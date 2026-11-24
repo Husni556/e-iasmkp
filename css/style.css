@@ -45,6 +45,7 @@ a{color:var(--blue)}
 .login-badges span.or{background:var(--orange);border-color:var(--orange)}
 .login-card{padding:24px;display:flex;align-items:center;justify-content:center}
 .login-card form{width:100%;max-width:380px;display:flex;flex-direction:column;gap:14px}
+.mark.logo{background:#fff;padding:4px;box-shadow:0 0 0 1px rgba(255,255,255,.35)}.mark.logo img{max-width:100%;max-height:100%;object-fit:contain;display:block}
 .mark{width:40px;height:40px;border-radius:8px;background:var(--orange);color:#fff;font:800 16px var(--f-head);display:flex;align-items:center;justify-content:center;letter-spacing:-.04em;flex:none}
 .brandrow{display:flex;align-items:center;gap:12px}
 @media(min-width:900px){#view-login{grid-template-columns:1.1fr 1fr}.login-brand{padding:48px}.login-brand h1{font-size:32px;line-height:40px}}
@@ -253,3 +254,4 @@ code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px}
 .rub-i.pick{cursor:pointer}.rub-i.pick:hover{outline:2px solid #1F3FD0}
 .rub-i.on{background:#E3EAFF;outline:2px solid #1F3FD0}
 @media (max-width:560px){.rub-i{grid-template-columns:1fr}}
+.brandrow .mark.logo{width:54px;height:54px}

@@ -1,7 +1,7 @@
 /* Service Worker E-IASMKP. Aturan: permintaan ke Apps Script TIDAK PERNAH di-cache. */
 const VER = 'iasmkp-v2.2.0';
 const OPSI = ['./js/formulir.js', './js/vendor/jszip.min.js', './tpl/Formulir_Kriteria_SMKP.xlsx']; // untuk unduh formulir offline; kegagalan tidak membatalkan instalasi
-const SHELL = ['./', './index.html', './css/style.css', './js/config.js', './js/app.js', './manifest.json', './icons/icon-192.png', './icons/icon-512.png'];
+const SHELL = ['./', './index.html', './css/style.css', './js/config.js', './js/app.js', './logo.png', './manifest.json', './icons/icon-192.png', './icons/icon-512.png'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(VER).then(c => c.addAll(SHELL).then(() => Promise.all(OPSI.map(u => c.add(u).catch(() => 0))))).then(() => self.skipWaiting()));
