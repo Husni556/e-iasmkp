@@ -621,9 +621,21 @@ function rowHtml(k, child) {
     (open ? '<div class="detail"><label class="label" for="nt-' + esc(k.Kode) + '">Catatan lapangan & fakta temuan</label><textarea class="textarea" id="nt-' + esc(k.Kode) + '" data-k="' + esc(k.Kode) + '" onchange="saveNote(this)"' + (can ? '' : ' disabled') + ' placeholder="Identitas sarana, nomor lambung, personel yang diwawancara…">' + esc(note) + '</textarea><div class="label mt8" style="margin-top:10px">Bukti objektif</div>' + evidenceHtml({ auditId: a.ID, kode: k.Kode }, can || isR('LEAD', 'AUDITOR')) +
       (can ? '<label class="check mt8"><input type="checkbox" data-k="' + esc(k.Kode) + '" onchange="markDone(this)"' + (v && v.s ? ' checked' : '') + '> Tandai selesai diperiksa</label>' : '') + '</div>' : '') + '</div>';
 }
+/** Sebaran temuan per sub-elemen: dasar aturan Mayor (> ambang % lokasi). Lokasi/departemen dicatat pada tiap temuan. */
+function sebaranSub(aid, sub) {
+  const a = auditById(aid), tot = Number(a && a.JumlahLokasi) || 0, aL = Number(P('AMBANG_MAYOR_LOKASI') || 30), lok = {}, dep = {}; let nT = 0;
+  S.d.temuan.forEach(x => { if (x.AuditID !== aid || subOf(x.Kode) !== sub || x.Kategori === 'OFI') return; nT++; if (x.Lokasi) lok[lc(x.Lokasi)] = x.Lokasi; if (x.Departemen) dep[lc(x.Departemen)] = x.Departemen; });
+  const n = Object.keys(lok).length;
+  return { nT, n, tot, aL, lokasi: Object.keys(lok).map(k => lok[k]), dept: Object.keys(dep).map(k => dep[k]), lewat: tot > 0 && n / tot * 100 > aL };
+}
+function sebaranHtml(sub) {
+  const b = sebaranSub(curAudit().ID, sub); if (!b.nT) return '';
+  return '<div class="sm muted" style="margin-top:6px"><span class="chip ' + (b.lewat ? 'maj' : 'mute') + '"><span class="ms sm">location_on</span>Temuan di ' + b.n + (b.tot ? ' dari ' + b.tot : '') + ' lokasi' + (b.tot ? ' (' + f0(b.n / b.tot * 100) + '%)' : '') + (b.lewat ? ' · > ' + b.aL + '% → Mayor' : '') + '</span> ' +
+    (b.lokasi.length ? esc(b.lokasi.join(', ')) : '<i>lokasi belum diisi pada temuan</i>') + (b.dept.length ? ' · Dept: ' + esc(b.dept.join(', ')) : '') + '</div>';
+}
 function subHead(s, grp) {
   const a = curAudit(), sp = persenSub(a.ID)[s.Kode] || { mx: 0, sk: 0, terisi: 0, persen: 0 }, low = sp.terisi > 0 && sp.persen < Number(P('AMBANG_MAYOR_SKOR') || 50);
-  return '<div class="grow"><span class="s-code">Sub-elemen ' + esc(s.Kode) + '</span> ' + (low ? '<span class="chip maj"><span class="ms sm">warning</span>&lt; ' + (P('AMBANG_MAYOR_SKOR') || 50) + '% → potensi Mayor</span>' : '') + '<div class="s-name">' + esc(s.Nama) + '</div></div><div class="s-score"><div class="muted sm">Realisasi</div><b class="num">' + sp.sk + '</b><span class="muted sm"> / ' + sp.mx + ' (' + f0(sp.persen) + '%)</span></div>';
+  return '<div class="grow"><span class="s-code">Sub-elemen ' + esc(s.Kode) + '</span> ' + (low ? '<span class="chip maj"><span class="ms sm">warning</span>&lt; ' + (P('AMBANG_MAYOR_SKOR') || 50) + '% → potensi Mayor</span>' : '') + '<div class="s-name">' + esc(s.Nama) + '</div>' + sebaranHtml(s.Kode) + '</div><div class="s-score"><div class="muted sm">Realisasi</div><b class="num">' + sp.sk + '</b><span class="muted sm"> / ' + sp.mx + ' (' + f0(sp.persen) + '%)</span></div>';
 }
 function rChecklist() {
   const el = $('#page-checklist'), a = curAudit();
