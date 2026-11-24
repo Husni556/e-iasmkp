@@ -154,8 +154,8 @@ function usulKategori(t) {
   const aS = Number(P('AMBANG_MAYOR_SKOR') || 50), aL = Number(P('AMBANG_MAYOR_LOKASI') || 30);
   if (info && info.terisi > 0 && info.persen < aS) return { kategori: 'Mayor', alasan: 'Skor sub-elemen ' + s + ' = ' + f0(info.persen) + '% (< ' + aS + '%)' };
   const lok = {};
-  S.d.temuan.forEach(x => { if (x.AuditID === t.AuditID && x.ID !== t.ID && subOf(x.Kode) === s && x.Kategori !== 'Kritikal' && x.Kategori !== 'Mayor' && x.Lokasi) lok[lc(x.Lokasi)] = 1; });
-  if (t.Lokasi) lok[lc(t.Lokasi)] = 1;
+  S.d.temuan.forEach(x => { if (x.AuditID === t.AuditID && x.ID !== t.ID && subOf(x.Kode) === s && x.Kategori !== 'Kritikal' && x.Kategori !== 'Mayor' && x.Lokasi) lok[lc(nLok(x.Lokasi))] = 1; });
+  if (t.Lokasi) lok[lc(nLok(t.Lokasi))] = 1;
   const n = Object.keys(lok).length, tot = Number(a.JumlahLokasi) || 0;
   if (tot > 0 && n / tot * 100 > aL) return { kategori: 'Mayor', alasan: 'Temuan minor sub-elemen ' + s + ' di ' + n + ' dari ' + tot + ' lokasi (> ' + aL + '%)' };
   return { kategori: 'Minor', alasan: 'Ketidaksesuaian terhadap peraturan/standar' };
@@ -428,9 +428,9 @@ function rDashboard() {
   const auditee = isR('AUDITEE'), sk = hitungSkor(a.ID), c = counts(a.ID), ps = picaStats(a.ID), tot = c.Kritikal + c.Mayor + c.Minor;
   const prev = S.d.audits.filter(x => x.ID !== a.ID && Number(x.Tahun) < Number(a.Tahun) && x.Status === 'Disetujui').sort((x, y) => y.Tahun - x.Tahun)[0];
   const prevSk = prev ? hitungSkor(prev.ID).total : null;
-  const dl = a.TglPenutupan ? (() => { const d = new Date(a.TglPenutupan + 'T00:00:00'); d.setDate(d.getDate() + (Number(P('TENGGAT_HARI')) || 30)); const iso = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); return { iso, left: daysTo(iso) }; })() : null;
+  const dl = (() => { const ds = S.d.temuan.filter(t => t.AuditID === a.ID && t.Kategori && t.Kategori !== 'OFI' && t.Status !== 'Closed' && t.Tenggat).map(t => String(t.Tenggat).slice(0, 10)).sort(); return ds.length ? { iso: ds[0], left: daysTo(ds[0]), n: ds.length } : null; })();
   let h = '<div class="card" style="display:flex;flex-wrap:wrap;gap:12px;justify-content:space-between;align-items:center;margin-bottom:12px"><div class="grow" style="min-width:240px"><div class="flex wrap mb8">' + statusChip(a.Status) + '<span class="chip mute">Kepdirjen 185.K/37.04/DJB/2019</span>' + (a.LingkupLokasi ? '<span class="muted sm">• ' + esc(a.LingkupLokasi) + '</span>' : '') + '</div><h1 style="font-size:22px;line-height:30px">' + esc(a.Nama) + '</h1><div class="muted">' + fmtD(a.TglMulai) + ' – ' + fmtD(a.TglSelesai) + '</div></div>' +
-    (dl ? '<div class="banner' + (dl.left < 0 ? ' crit' : '') + '"><span class="ms lg">hourglass_top</span><div><b>Tenggat laporan ' + fmtD(dl.iso) + '</b><span class="sm">' + (dl.left < 0 ? 'Terlambat ' + (-dl.left) + ' hari' : dl.left + ' hari lagi') + ' · ' + (P('TENGGAT_HARI') || 30) + ' hari setelah penutupan (tenggat PICA: per temuan)</span></div></div>'
+    (dl ? '<div class="banner' + (dl.left < 0 ? ' crit' : '') + '"><span class="ms lg">hourglass_top</span><div><b>Tenggat PICA terdekat ' + fmtD(dl.iso) + '</b><span class="sm">' + (dl.left < 0 ? 'Terlambat ' + (-dl.left) + ' hari' : dl.left + ' hari lagi') + ' · ditetapkan auditor · ' + dl.n + ' temuan belum Closed</span></div></div>'
       : (a.Status !== 'Draft' ? '<div class="banner info"><span class="ms">info</span><div><b>Tanggal penutupan belum diisi</b><span class="sm">Isi di Jadwal agar tenggat 30 hari dihitung.</span></div></div>' : '')) + '</div>';
   h += '<div class="grid g4">';
   if (!auditee) h += '<div class="card kpi"><div class="k-top"><span>Pencapaian Total SMKP</span><span class="ico"><span class="ms">verified_user</span></span></div><div class="big num">' + f1(sk.total) + '%</div><div class="bar mt8"><i class="f-navy" style="width:' + Math.min(100, sk.total) + '%"></i></div><div class="sub"><span>' + (sk.terisi < sk.butir ? 'Sementara · ' + sk.terisi + '/' + sk.butir + ' butir terisi' : 'Semua butir terisi') + '</span>' + (prevSk !== null ? '<span>vs ' + esc(prev.Tahun) + ' (' + f1(prevSk) + '%)</span>' : '') + '</div></div>';
@@ -624,7 +624,7 @@ function rowHtml(k, child) {
 /** Sebaran temuan per sub-elemen: dasar aturan Mayor (> ambang % lokasi). Lokasi/departemen dicatat pada tiap temuan. */
 function sebaranSub(aid, sub) {
   const a = auditById(aid), tot = Number(a && a.JumlahLokasi) || 0, aL = Number(P('AMBANG_MAYOR_LOKASI') || 30), lok = {}, dep = {}; let nT = 0;
-  S.d.temuan.forEach(x => { if (x.AuditID !== aid || subOf(x.Kode) !== sub || x.Kategori === 'OFI') return; nT++; if (x.Lokasi) lok[lc(x.Lokasi)] = x.Lokasi; if (x.Departemen) dep[lc(x.Departemen)] = x.Departemen; });
+  S.d.temuan.forEach(x => { if (x.AuditID !== aid || subOf(x.Kode) !== sub || x.Kategori === 'OFI') return; nT++; if (x.Lokasi) lok[lc(nLok(x.Lokasi))] = nLok(x.Lokasi); if (x.Departemen) dep[lc(x.Departemen)] = x.Departemen; });
   const n = Object.keys(lok).length;
   return { nT, n, tot, aL, lokasi: Object.keys(lok).map(k => lok[k]), dept: Object.keys(dep).map(k => dep[k]), lewat: tot > 0 && n / tot * 100 > aL };
 }
@@ -700,9 +700,10 @@ function markDone(cb) {
 
 /* ============================== TEMUAN ============================== */
 function kriNama(kode) { const k = krMap()[kode]; return k ? k.Nama : kode; }
+const nLok = l => String(l || '').replace(/^\s*#+\s*/, '').trim();
 function lokasiOptions(aid) {
-  const a = auditById(aid), set = {}; String((a && a.LingkupLokasi) || '').split(/[,\n;]/).forEach(x => { x = x.trim(); if (x) set[x] = 1; });
-  S.d.temuan.forEach(t => { if (t.Lokasi) set[t.Lokasi] = 1; }); return Object.keys(set);
+  const a = auditById(aid), set = {}; String((a && a.LingkupLokasi) || '').split(/[,\n;]/).forEach(x => { x = x.replace(/^\s*#+\s*/, '').trim(); if (x) set[x] = 1; });
+  S.d.temuan.forEach(t => { const l = String(t.Lokasi || '').replace(/^\s*#+\s*/, '').trim(); if (l) set[l] = 1; }); return Object.keys(set);
 }
 function deptOptions() { const set = {}; S.d.users.forEach(u => { if (u.Departemen) set[u.Departemen] = 1; }); S.d.temuan.forEach(t => { if (t.Departemen) set[t.Departemen] = 1; }); return Object.keys(set); }
 function canEditT(t) {
