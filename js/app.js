@@ -764,7 +764,7 @@ function temuanForm(t, ro) {
     (t.Kategori && t.Kategori !== 'OFI' ? '<div class="field"><label class="label">Tenggat perbaikan (ditetapkan auditor) — dasar status overdue PICA</label><input class="input" type="date" data-f="Tenggat" value="' + esc(String(t.Tenggat || '').slice(0, 10)) + '" onchange="tField(this)"' + (isR('LEAD', 'AUDITOR') ? d : ' disabled') + '></div>' : '') +
     '<div class="field"><label class="label">Uraian ketidaksesuaian (fakta objektif)</label><textarea class="textarea" data-f="Uraian" onchange="tField(this)"' + d + '>' + esc(t.Uraian || '') + '</textarea></div>' +
     '<div class="field"><label class="label">Persyaratan / acuan yang tidak dipenuhi</label><textarea class="textarea" data-f="Persyaratan" onchange="tField(this)"' + d + '>' + esc(t.Persyaratan || '') + '</textarea></div>' +
-    '<details class="detail"><summary class="b" style="cursor:pointer;min-height:36px;display:flex;align-items:center">Analisis akar masalah (5-Why)</summary><div class="mt8" style="display:grid;gap:8px">' + why + '<div class="field"><label class="label">Akar masalah inti</label><textarea class="textarea" data-f="AkarMasalah" onchange="tField(this)"' + d + '>' + esc(t.AkarMasalah || '') + '</textarea></div></div></details>';
+    '<details class="detail"><summary class="b" style="cursor:pointer;min-height:36px;display:flex;align-items:center">Analisis akar masalah (5-Why)</summary><div class="mt8" style="display:grid;gap:8px">' + why + '<div class="field"><label class="label">Akar masalah inti <span class="muted" style="font-weight:400">— terisi otomatis dari "Mengapa" terakhir; boleh diedit</span></label><textarea class="textarea" data-f="AkarMasalah" onchange="tField(this)"' + d + '>' + esc(t.AkarMasalah || '') + '</textarea>' + (ro ? '' : '<button class="btn sm ghost mt8" type="button" onclick="akarSusun(this)">Susun ulang dari 5-Why</button>') + '</div></div></details>';
 }
 function openTemuan(id) {
   const t = S.d.temuan.find(x => x.ID === id); if (!t) return; S.drawer = id;
@@ -781,9 +781,16 @@ function openTemuan(id) {
   openModal(html, { drawer: true });
 }
 function refreshDrawer() { if (S.drawer && $('#ovl')) { const sc = $('#ovl .drawer').scrollTop; openTemuan(S.drawer); const d = $('#ovl .drawer'); if (d) d.scrollTop = sc; } }
+function akarAuto(t) { const w = [1, 2, 3, 4, 5].map(i => String(t['Why' + i] || '').trim()).filter(Boolean); return w.length ? w[w.length - 1] : ''; }
+function akarSusun(btn) { const t = S.d.temuan.find(x => x.ID === S.drawer); if (!t || !canEditT(t)) return; const v = akarAuto(t); t.AkarMasalah = v; const ta = document.querySelector('[data-f="AkarMasalah"]'); if (ta) ta.value = v; save('Temuan', { ID: t.ID, AuditID: t.AuditID, AkarMasalah: v }); toast('Akar masalah disusun dari jawaban 5-Why terakhir.'); }
 function tField(inp) {
   const id = S.drawer, t = S.d.temuan.find(x => x.ID === id); if (!t || !canEditT(t)) return;
-  const r = { ID: id, AuditID: t.AuditID }; r[inp.dataset.f] = inp.value; if (inp.dataset.f === 'Uraian' && !inp.value.trim()) { toast('Uraian tidak boleh kosong.', 'err'); inp.value = t.Uraian; return; }
+  const r = { ID: id, AuditID: t.AuditID }; r[inp.dataset.f] = inp.value;
+  if (/^Why[1-5]$/.test(inp.dataset.f)) { // akar masalah inti ikut otomatis selama belum diubah manual
+    const lama = akarAuto(t), cur = String(t.AkarMasalah || '').trim(); t[inp.dataset.f] = inp.value; const baru = akarAuto(t);
+    if (!cur || cur === lama) { r.AkarMasalah = baru; t.AkarMasalah = baru; const ta = document.querySelector('[data-f="AkarMasalah"]'); if (ta) ta.value = baru; }
+  }
+  if (inp.dataset.f === 'Uraian' && !inp.value.trim()) { toast('Uraian tidak boleh kosong.', 'err'); inp.value = t.Uraian; return; }
   save('Temuan', r); t.KategoriUsulan = usulKategori(t).kategori; S.dirty = {}; S.dirty.temuan = true; if (S.page === 'temuan') paintTemuanList();
 }
 function setKategori(id, k) {
