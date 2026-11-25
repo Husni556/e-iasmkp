@@ -39,7 +39,7 @@ const S = {
   token: null, user: null, d: null,         // d = data bootstrap
   nilai: {},                                // { auditId: { kode: {n, c, s} } }
   audit: null, page: 'dashboard', el: null, // audit aktif, halaman, elemen aktif (checklist)
-  dirty: {}, filters: { t: { q: '', kat: '', el: '', st: '', lok: '' }, p: { tab: 'all' }, m: { tab: 'kriteria', q: '' }, u: { q: '' } },
+  dirty: {}, filters: { t: { q: '', kat: '', el: '', st: '', lok: '', dep: '' }, p: { tab: 'all' }, m: { tab: 'kriteria', q: '' }, u: { q: '' } },
   openRows: {}, upl: [], sync: 'ok', loaded: false, dv: null
 };
 const Q = { items: [], busy: false, timer: null };
@@ -394,11 +394,19 @@ async function previewBukti(id) {
 function emptyBox(icon, title, msg, btn) {
   return '<div class="card empty"><span class="ms">' + icon + '</span><div class="b" style="font-size:16px;color:var(--text)">' + esc(title) + '</div><div>' + esc(msg) + '</div>' + (btn || '') + '</div>';
 }
+// Fase tindak lanjut per temuan: rencana (belum ada rencana) → pelaksanaan (rencana terisi, menunggu bukti) → review (bukti diajukan) → closed.
+function picaFase(t) {
+  if (t.Status === 'Closed') return 'closed';
+  const rows = S.d.pica.filter(p => p.TemuanID === t.ID);
+  if (rows.some(p => p.Status === 'Diajukan')) return 'review';
+  if (rows.some(p => p.Koreksi && p.Korektif && p.Target)) return 'pelaksanaan';
+  return 'rencana';
+}
 function picaStats(aid) {
-  const ts = S.d.temuan.filter(t => t.AuditID === aid && t.Kategori && t.Kategori !== 'OFI'), r = { total: ts.length, closed: 0, review: 0, open: 0, overdue: 0 };
+  const ts = S.d.temuan.filter(t => t.AuditID === aid && t.Kategori && t.Kategori !== 'OFI'), r = { total: ts.length, closed: 0, review: 0, open: 0, overdue: 0, rencana: 0, pelaksanaan: 0 };
   ts.forEach(t => {
-    const over = t.Tenggat && daysTo(t.Tenggat) < 0 && t.Status !== 'Closed';
-    if (t.Status === 'Closed') r.closed++; else if (t.Status === 'Review') r.review++; else r.open++;
+    const over = t.Tenggat && daysTo(t.Tenggat) < 0 && t.Status !== 'Closed', f = picaFase(t);
+    if (f === 'closed') r.closed++; else if (f === 'review') r.review++; else { r.open++; r[f]++; }
     if (over) r.overdue++;
   });
   return r;
@@ -746,23 +754,29 @@ function rTemuan() {
   if (c.draft && canTemuan()) h += '<div class="banner mt16" style="margin-top:12px"><span class="ms">pending_actions</span><div><b>' + c.draft + ' temuan menunggu penetapan kategori</b><span class="sm">' + (isR('LEAD') ? 'Buka temuan untuk menetapkan Kritikal/Mayor/Minor.' : 'Lead Auditor akan menetapkan kategori final.') + '</span></div></div>';
   const tgKosong = S.d.temuan.filter(t => t.AuditID === a.ID && t.Kategori && t.Kategori !== 'OFI' && t.Status !== 'Closed' && !t.Tenggat && (isR('LEAD', 'ADMIN') || (isR('AUDITOR') && t.Oleh === S.user.email)));
   if (tgKosong.length && isR('LEAD', 'AUDITOR', 'ADMIN')) h += '<div class="banner mt16" style="margin-top:12px;flex-wrap:wrap"><span class="ms">event</span><div style="flex:1;min-width:220px"><b>' + tgKosong.length + ' temuan belum punya tenggat perbaikan</b><span class="sm">Tenggat wajib sebelum audit dikunci (Review). Kamu bisa menetapkan satu tanggal sekaligus untuk semua yang kosong, lalu mengubah per temuan bila perlu.</span></div><div class="flex" style="gap:8px"><input class="input" type="date" id="tgMassal" style="width:auto"><button class="btn primary sm" type="button" onclick="tenggatMassal()">Terapkan ke ' + tgKosong.length + ' temuan</button></div></div>';
-  const f = S.filters.t, locs = lokasiOptions(a.ID);
+  const f = S.filters.t, locs = lokasiOptions(a.ID), deps = deptFilterOpts(a.ID);
   h += '<div class="card mt16" style="margin-top:12px"><div class="filters"><div class="searchbox"><span class="ms">search</span><input class="input" id="tQ" placeholder="Cari nomor, kriteria, uraian…" value="' + esc(f.q) + '" oninput="tFilter()" aria-label="Cari temuan"></div>' +
     '<select class="select" id="tK" onchange="tFilter()" aria-label="Kategori"><option value="">Kategori: semua</option>' + ['Kritikal', 'Mayor', 'Minor', 'OFI', 'Draft'].map(k => '<option' + (f.kat === k ? ' selected' : '') + '>' + k + '</option>').join('') + '</select>' +
     '<select class="select" id="tE" onchange="tFilter()" aria-label="Elemen"><option value="">Elemen: I–VII</option>' + S.d.elemen.map(e => '<option value="' + e.Kode + '"' + (f.el === e.Kode ? ' selected' : '') + '>' + e.Kode + ' ' + esc(e.Nama) + '</option>').join('') + '</select>' +
+    (isR('AUDITEE') ? '' : '<select class="select" id="tD" onchange="tFilter()" aria-label="Departemen"><option value="">Departemen: semua</option>' + deps.map(d => '<option value="' + esc(d.k) + '"' + (f.dep === d.k ? ' selected' : '') + '>' + esc(d.n) + '</option>').join('') + '</select>') +
     '<select class="select" id="tL" onchange="tFilter()" aria-label="Lokasi"><option value="">Area: semua</option>' + locs.map(l => '<option' + (f.lok === l ? ' selected' : '') + '>' + esc(l) + '</option>').join('') + '</select>' +
     '<select class="select" id="tS" onchange="tFilter()" aria-label="Status"><option value="">Status: semua</option>' + [['Open', 'Open'], ['Review', 'Review'], ['Closed', 'Closed'], ['Overdue', 'Overdue']].map(s => '<option value="' + s[0] + '"' + (f.st === s[0] ? ' selected' : '') + '>' + s[1] + '</option>').join('') + '</select></div></div>';
   h += '<div class="mt16" style="margin-top:12px" id="tList"></div>';
   el.innerHTML = h; paintTemuanList();
 }
 const tFilter = debounce(() => {
-  S.filters.t = { q: $('#tQ').value, kat: $('#tK').value, el: $('#tE').value, lok: $('#tL').value, st: $('#tS').value }; paintTemuanList();
+  S.filters.t = { q: $('#tQ').value, kat: $('#tK').value, el: $('#tE').value, lok: $('#tL').value, st: $('#tS').value, dep: $('#tD') ? $('#tD').value : '' }; paintTemuanList();
 }, 120);
+function deptFilterOpts(aid) {
+  const m = {}, cnt = {}; let none = 0;
+  S.d.temuan.forEach(t => { if (t.AuditID !== aid) return; const k = nDept(t.Departemen); if (!k) { none++; return; } if (!m[k]) m[k] = String(t.Departemen).trim(); cnt[k] = (cnt[k] || 0) + 1; });
+  const r = Object.keys(m).sort().map(k => ({ k, n: m[k] + ' (' + cnt[k] + ')' })); if (none) r.push({ k: '__none', n: '(tanpa departemen) (' + none + ')' }); return r;
+}
 function paintTemuanList() {
   const a = curAudit(), f = S.filters.t, q = lc(f.q); if (!$('#tList')) return;
   const list = S.d.temuan.filter(t => t.AuditID === a.ID).filter(t => {
     if (f.kat === 'Draft' ? t.Kategori : (f.kat && t.Kategori !== f.kat)) return false;
-    if (f.el && rootOf(t.Kode) !== f.el) return false; if (f.lok && t.Lokasi !== f.lok) return false;
+    if (f.dep && (f.dep === '__none' ? nDept(t.Departemen) : nDept(t.Departemen) !== f.dep)) return false; if (f.el && rootOf(t.Kode) !== f.el) return false; if (f.lok && t.Lokasi !== f.lok) return false;
     if (f.st) { const over = t.Tenggat && daysTo(t.Tenggat) < 0 && t.Status !== 'Closed'; if (f.st === 'Overdue' ? !over : t.Status !== f.st) return false; }
     if (q && (t.Nomor + ' ' + t.Kode + ' ' + kriNama(t.Kode) + ' ' + t.Uraian + ' ' + t.Lokasi + ' ' + t.Departemen).toLowerCase().indexOf(q) < 0) return false; return true;
   }).sort((x, y) => String(y.TS).localeCompare(String(x.TS)));
@@ -854,21 +868,23 @@ function temuanModal(opt) {
 }
 
 /* ============================== PICA ============================== */
-function picaStChip(s) { return '<span class="chip ' + ({ Open: 'min', Diajukan: 'maj', Terverifikasi: 'ok', Ditolak: 'crit' }[s] || '') + '">' + esc(s) + '</span>'; }
+function picaStChip(s) { return '<span class="chip ' + ({ Open: 'min', Direncanakan: 'info', Diajukan: 'maj', Terverifikasi: 'ok', Ditolak: 'crit' }[s] || '') + '">' + esc(s) + '</span>'; }
 function nDept(v) { return String(v || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(); }
 function hintAuditee() { const d = S.user.dept; return d ? 'Yang tampil hanya temuan departemen “' + d + '” yang sudah ditetapkan kategorinya oleh Lead Auditor (kolom Departemen pada temuan harus sama dengan departemen akunmu).' : 'Akunmu belum punya departemen. Minta Admin mengisi Departemen di menu Pengguna.'; }
 function canPicaEdit(t, p) {
   if (!t || t.Status === 'Closed') return false; const a = auditById(t.AuditID); if (!a) return false; // tindak lanjut berlanjut setelah laporan disetujui
   if (p && p.Status === 'Terverifikasi') return false;
-  if (isR('AUDITEE')) return nDept(t.Departemen) === nDept(S.user.dept) && (!p || ['Open', 'Ditolak'].indexOf(p.Status) > -1);
+  if (isR('AUDITEE')) return nDept(t.Departemen) === nDept(S.user.dept) && (!p || ['Open', 'Direncanakan', 'Ditolak'].indexOf(p.Status) > -1);
   return isR('LEAD', 'AUDITOR');
 }
-function picaAddBtn(t) { return canPicaEdit(t) ? '<button class="btn sm primary" data-id="' + esc(t.ID) + '" onclick="picaModal(this.dataset.id)"><span class="ms sm">add_task</span>Isi tindak lanjut</button>' : ''; }
+const auditDisetujui = t => { const a = auditById(t.AuditID); return !!a && a.Status === 'Disetujui'; };
+function picaAddBtn(t) { return canPicaEdit(t) ? '<button class="btn sm primary" data-id="' + esc(t.ID) + '" onclick="picaModal(this.dataset.id)"><span class="ms sm">add_task</span>' + (auditDisetujui(t) ? 'Isi rencana & bukti' : 'Isi rencana tindak lanjut') + '</button>' : ''; }
 function picaRowHtml(p, t) {
-  let b = ''; if (canPicaEdit(t, p)) b += '<button class="btn sm ghost" data-t="' + esc(t.ID) + '" data-id="' + esc(p.ID) + '" onclick="picaModal(this.dataset.t,this.dataset.id)"><span class="ms sm">edit</span>Ubah</button>';
+  const apr = auditDisetujui(t), rencanaOk = !!(p.Koreksi && p.Korektif && p.Target);
+  let b = ''; if (canPicaEdit(t, p)) b += '<button class="btn sm ' + (apr && rencanaOk ? 'primary' : 'ghost') + '" data-t="' + esc(t.ID) + '" data-id="' + esc(p.ID) + '" onclick="picaModal(this.dataset.t,this.dataset.id)"><span class="ms sm">' + (apr && rencanaOk ? 'upload_file' : 'edit') + '</span>' + (apr ? (rencanaOk ? 'Unggah bukti & ajukan' : 'Lengkapi & ajukan') : 'Ubah rencana') + '</button>';
   if (p.Status === 'Diajukan' && isR('LEAD', 'AUDITOR')) b += '<button class="btn sm ok" data-id="' + esc(p.ID) + '" onclick="verifyPica(this.dataset.id,true)"><span class="ms sm">verified</span>Setujui</button><button class="btn sm warn" data-id="' + esc(p.ID) + '" onclick="verifyPica(this.dataset.id,false)"><span class="ms sm">replay</span>Tolak</button>';
   const over = p.Target && daysTo(p.Target) < 0 && p.Status !== 'Terverifikasi';
-  return '<div class="card flat" style="background:var(--soft)"><div class="flex between wrap">' + picaStChip(p.Status) + (over ? '<span class="chip crit">Target lewat</span>' : '') + '</div><dl class="kv mt8" style="margin-top:8px"><dt>Koreksi</dt><dd>' + esc(p.Koreksi || '-') + '</dd><dt>Korektif</dt><dd>' + esc(p.Korektif || '-') + '</dd><dt>PIC</dt><dd>' + esc(p.PIC || '-') + (t.PICDitunjuk && p.PIC && p.PIC !== t.PICDitunjuk ? ' <span class="muted sm">(ditunjuk auditor: ' + esc(t.PICDitunjuk) + ', PIC diubah)</span>' : '') + '</dd><dt>Target</dt><dd>' + fmtD(p.Target) + '</dd>' + (p.CatatanVerif ? '<dt>Catatan</dt><dd style="color:var(--crit)">' + esc(p.CatatanVerif) + '</dd>' : '') + '</dl><div class="mt8" style="margin-top:8px">' + evidenceHtml({ auditId: t.AuditID, temuanId: t.ID, tindakId: p.ID, kode: t.Kode }, false) + '</div>' + (b ? '<div class="flex wrap mt8" style="margin-top:8px">' + b + '</div>' : '') + '</div>';
+  return '<div class="card flat" style="background:var(--soft)"><div class="flex between wrap">' + picaStChip(p.Status) + (over ? '<span class="chip crit">Target lewat</span>' : '') + '</div><dl class="kv mt8" style="margin-top:8px"><dt>Koreksi</dt><dd>' + esc(p.Koreksi || '-') + '</dd><dt>Korektif</dt><dd>' + esc(p.Korektif || '-') + '</dd><dt>PIC</dt><dd>' + esc(p.PIC || '-') + (t.PICDitunjuk && p.PIC && p.PIC !== t.PICDitunjuk ? ' <span class="muted sm">(ditunjuk auditor: ' + esc(t.PICDitunjuk) + ', PIC diubah)</span>' : '') + '</dd><dt>Target</dt><dd>' + fmtD(p.Target) + '</dd>' + (p.CatatanVerif ? '<dt>Catatan</dt><dd style="color:var(--crit)">' + esc(p.CatatanVerif) + '</dd>' : '') + '</dl>' + (p.Status === 'Direncanakan' && !apr ? '<div class="muted sm mt8" style="margin-top:8px">Rencana tersimpan dan akan tercantum dalam laporan. Bukti pelaksanaan diajukan setelah audit disetujui.</div>' : '') + '<div class="mt8" style="margin-top:8px">' + evidenceHtml({ auditId: t.AuditID, temuanId: t.ID, tindakId: p.ID, kode: t.Kode }, false) + '</div>' + (b ? '<div class="flex wrap mt8" style="margin-top:8px">' + b + '</div>' : '') + '</div>';
 }
 function recalcLocal() {
   S.d.temuan.forEach(t => {
@@ -877,8 +893,9 @@ function recalcLocal() {
   });
 }
 function savePica(rec) { save('Tindak_Lanjut', rec); recalcLocal(); touch(); if (S.drawer) refreshDrawer(); }
-function picField(t, p) {
+function picField(t, p, dis) {
   const o = picOpts(t), cur = p.PIC || picDefault(t);
+  if (dis) return '<input class="input" id="pcP" value="' + esc(cur) + '" disabled>';
   if (!o.length) return '<input class="input" id="pcP" value="' + esc(cur) + '" placeholder="Belum ada auditee di departemen ini — ketik nama PIC">';
   const names = o.map(u => u.Nama), lain = cur && names.indexOf(cur) < 0;
   return '<select class="select" id="pcS" onchange="picPilih(this)"><option value="">— Pilih PIC —</option>' + o.map(u => '<option value="' + esc(u.Nama) + '"' + (u.Nama === cur ? ' selected' : '') + '>' + esc(u.Nama) + '</option>').join('') + '<option value="__lain"' + (lain ? ' selected' : '') + '>Lainnya (ketik manual)…</option></select>' +
@@ -889,22 +906,28 @@ function picOpts(t) { return S.d.users.filter(u => u.Role === 'AUDITEE' && Numbe
 function picDefault(t) { if (t.PICDitunjuk) return t.PICDitunjuk; if (isR('AUDITEE')) return S.user.nama; const o = picOpts(t); return o.length === 1 ? o[0].Nama : ''; }
 function picaModal(tid, pid) {
   const t = S.d.temuan.find(x => x.ID === tid), p = pid ? S.d.pica.find(x => x.ID === pid) : {}; if (!t) return;
+  const aprv = auditDisetujui(t), adaRencana = !!(p.Koreksi && p.Korektif && p.Target), kunci = aprv && adaRencana, dis = kunci ? ' disabled' : '';
   const id = p.ID || uid(), ctx = { auditId: t.AuditID, temuanId: tid, tindakId: id, kode: t.Kode };
-  const ov = openModal(mHead('Formulir respon PICA — ' + t.Nomor, 'assignment_turned_in') + '<div class="m-body"><div class="card flat" style="background:var(--soft)"><div class="b sm">' + esc(t.Kode) + ' · ' + esc(kriNama(t.Kode)) + '</div><div class="sm mt8" style="margin-top:6px">' + esc(t.Uraian) + '</div></div>' +
+  const info = aprv
+    ? '<div class="banner info"><span class="ms">task_alt</span><div><b>Tahap 2 — Pelaksanaan</b><span class="sm">' + (kunci ? 'Rencana di bawah sudah tercantum dalam laporan yang disetujui dan tidak dapat diubah. ' : 'Rencana belum lengkap — lengkapi dahulu. ') + 'Unggah bukti pelaksanaan, lalu ajukan ke auditor untuk diverifikasi.</span></div></div>'
+    : '<div class="banner info"><span class="ms">edit_note</span><div><b>Tahap 1 — Rencana tindak lanjut</b><span class="sm">Rencana ini akan dicantumkan dalam laporan audit. Bukti pelaksanaan diunggah nanti, setelah laporan disetujui.</span></div></div>';
+  const ov = openModal(mHead((aprv ? 'Pelaksanaan tindak lanjut — ' : 'Rencana tindak lanjut — ') + t.Nomor, 'assignment_turned_in') + '<div class="m-body"><div class="card flat" style="background:var(--soft)"><div class="b sm">' + esc(t.Kode) + ' · ' + esc(kriNama(t.Kode)) + '</div><div class="sm mt8" style="margin-top:6px">' + esc(t.Uraian) + '</div></div>' + info +
     (p.Status === 'Ditolak' && p.CatatanVerif ? '<div class="banner crit"><span class="ms">replay</span><div><b>Ditolak auditor</b><span class="sm">' + esc(p.CatatanVerif) + '</span></div></div>' : '') +
-    '<div class="field"><label class="label">Tindakan koreksi langsung (correction) *</label><textarea class="textarea" id="pcK" placeholder="Tindakan segera memperbaiki kondisi di lokasi…">' + esc(p.Koreksi || '') + '</textarea></div>' +
-    '<div class="field"><label class="label">Tindakan pencegahan berulang (corrective) *</label><textarea class="textarea" id="pcC" placeholder="Sistem/prosedur agar tidak terulang…">' + esc(p.Korektif || '') + '</textarea></div>' +
-    '<div class="grid g2"><div class="field"><label class="label">Penanggung jawab (PIC) * <span class="muted" style="font-weight:400">— otomatis dari departemen ' + esc(t.Departemen || '-') + '</span></label>' + picField(t, p) + '</div><div class="field"><label class="label">Target selesai *</label><input class="input" id="pcT" type="date" value="' + esc(p.Target || t.Tenggat || '') + '"></div></div>' +
-    '<div class="field"><label class="label">Bukti perbaikan</label><div id="pcEv">' + evidenceHtml(ctx, true) + '</div></div></div><div class="m-foot"><button class="btn ghost" id="pcDr">Simpan draf</button><button class="btn primary" id="pcGo"><span class="ms">send</span>Ajukan ke auditor</button></div>', { wide: true });
+    '<div class="field"><label class="label">Tindakan koreksi langsung (correction) *</label><textarea class="textarea" id="pcK"' + dis + ' placeholder="Tindakan segera memperbaiki kondisi di lokasi…">' + esc(p.Koreksi || '') + '</textarea></div>' +
+    '<div class="field"><label class="label">Tindakan pencegahan berulang (corrective) *</label><textarea class="textarea" id="pcC"' + dis + ' placeholder="Sistem/prosedur agar tidak terulang…">' + esc(p.Korektif || '') + '</textarea></div>' +
+    '<div class="grid g2"><div class="field"><label class="label">Penanggung jawab (PIC) *' + (kunci ? '' : ' <span class="muted" style="font-weight:400">— otomatis dari departemen ' + esc(t.Departemen || '-') + '</span>') + '</label>' + picField(t, p, kunci) + '</div><div class="field"><label class="label">Target selesai *</label><input class="input" id="pcT" type="date"' + dis + ' value="' + esc(p.Target || t.Tenggat || '') + '"></div></div>' +
+    (aprv ? '<div class="field"><label class="label">Bukti pelaksanaan *</label><div id="pcEv">' + evidenceHtml(ctx, true) + '</div></div>' : '') +
+    '</div><div class="m-foot">' + (kunci ? '' : '<button class="btn ghost" id="pcDr">Simpan draf</button>') + '<button class="btn primary" id="pcGo"><span class="ms">' + (aprv ? 'send' : 'save') + '</span>' + (aprv ? 'Ajukan bukti ke auditor' : 'Simpan rencana') + '</button></div>', { wide: true });
   const collect = st => { const k = $('#pcK').value.trim(), c = $('#pcC').value.trim(), pp = $('#pcP').value.trim(), tg = $('#pcT').value;
-    if (st === 'Diajukan' && (!k || !c || !pp || !tg)) { toast('Lengkapi koreksi, korektif, PIC, dan target sebelum mengajukan.', 'err'); return; }
-    if (st === 'Diajukan' && !evidenceOf(ctx).length) { toast('Unggah minimal satu bukti perbaikan (Foto/Berkas) sebelum mengajukan.', 'err'); return; }
+    if (st !== 'Open' && (!k || !c || !pp || !tg)) { toast('Lengkapi koreksi, korektif, PIC, dan target terlebih dahulu.', 'err'); return; }
+    if (st === 'Diajukan' && !evidenceOf(ctx).length) { toast('Unggah minimal satu bukti pelaksanaan (foto/berkas) sebelum mengajukan.', 'err'); return; }
     const pdt = Object.assign({ ID: id, TemuanID: tid, AuditID: t.AuditID, Koreksi: k, Korektif: c, PIC: pp, PICEmail: isR('AUDITEE') ? S.user.email : ((picOpts(t).find(u => u.Nama === pp) || {}).Email || p.PICEmail || ''), Target: tg, Status: st, Oleh: p.Oleh || S.user.email }, st === 'Diajukan' ? { CatatanVerif: '' } : {});
-    savePica(pdt); closeModal(); toast(st === 'Diajukan' ? 'Tindak lanjut diajukan ke auditor.' : 'Draf tersimpan.', 'ok'); };
-  $('#pcDr', ov).onclick = () => collect('Open'); $('#pcGo', ov).onclick = () => collect('Diajukan');
+    savePica(pdt); closeModal(); toast(st === 'Diajukan' ? 'Bukti pelaksanaan diajukan ke auditor.' : st === 'Direncanakan' ? 'Rencana tindak lanjut tersimpan dan akan tercantum dalam laporan.' : 'Draf tersimpan.', 'ok'); };
+  if ($('#pcDr', ov)) $('#pcDr', ov).onclick = () => collect('Open'); $('#pcGo', ov).onclick = () => collect(aprv ? 'Diajukan' : 'Direncanakan');
 }
 async function verifyPica(id, ok) {
   const p = S.d.pica.find(x => x.ID === id); if (!p) return; const base = { ID: id, TemuanID: p.TemuanID, AuditID: p.AuditID };
+  if (p.Status !== 'Diajukan') { toast('Hanya tindak lanjut yang sudah diajukan beserta bukti yang dapat diverifikasi.', 'err'); return; }
   if (lc(p.Oleh) === lc(S.user.email)) { toast('Kamu tidak dapat memverifikasi PICA yang kamu isi/ajukan sendiri. Minta Auditor atau Lead lain.', 'err'); return; }
   if (ok && !evidenceOf({ temuanId: p.TemuanID, tindakId: id }).length) { toast('Belum ada bukti perbaikan yang diunggah untuk PICA ini.', 'err'); return; }
   if (ok) { const c = await confirmBox('Setujui tindak lanjut?', 'Bukti memenuhi persyaratan. Bila seluruh tindakan terverifikasi, temuan menjadi Closed.', 'Setujui', 'ok'); if (!c) return; savePica(Object.assign(base, { Status: 'Terverifikasi', VerifOleh: S.user.email, VerifTS: nowIso(), CatatanVerif: '' })); toast('Terverifikasi.', 'ok'); }
@@ -916,10 +939,10 @@ function rPica() {
   if (!a) { el.innerHTML = h + emptyBox('task_alt', 'Belum ada audit', 'Pilih audit terlebih dahulu.'); return; }
   const ts = S.d.temuan.filter(t => t.AuditID === a.ID && t.Kategori && t.Kategori !== 'OFI'), ps = picaStats(a.ID), tab = S.filters.p.tab;
   const m = (lbl, n, cls, sub) => '<div class="card kpi" style="padding:12px"><div class="k-top"><span class="sm">' + lbl + '</span><span class="chip ' + cls + '">●</span></div><div class="big num" style="font-size:28px;line-height:34px">' + n + '<small>' + sub + '</small></div></div>';
-  h += '<div class="grid g4">' + m('Perlu tindakan (Open)', ps.open, 'info', 'temuan') + m('Menunggu verifikasi', ps.review, 'maj', 'temuan') + m('Selesai (Closed)', ps.closed, 'ok', 'terverifikasi') + '<div class="card kpi" style="padding:12px;background:var(--crit-bg);color:var(--crit)"><div class="k-top" style="color:var(--crit)"><span class="sm">Lewat tenggat</span><span class="chip crit">Warning</span></div><div class="big num" style="font-size:28px;line-height:34px">' + ps.overdue + '<small style="color:var(--crit)">temuan</small></div></div></div>';
-  const dp = {}; ts.forEach(t => { const k = t.Departemen || '(tanpa departemen)', x = dp[k] = dp[k] || { n: 0, c: 0, r: 0, o: 0, od: 0 }; x.n++; if (t.Status === 'Closed') x.c++; else if (t.Status === 'Review') x.r++; else x.o++; if (t.Tenggat && daysTo(t.Tenggat) < 0 && t.Status !== 'Closed') x.od++; });
-  if (ts.length) h += '<div class="card mt16" style="margin-top:12px"><div class="sec-t">Progres tindak lanjut per departemen</div><div class="table-wrap"><table class="t"><thead><tr><th>Departemen</th><th>Temuan</th><th>Selesai</th><th>Menunggu verifikasi</th><th>Belum</th><th>Overdue</th><th style="min-width:130px">Progres</th></tr></thead><tbody>' + Object.keys(dp).sort().map(k => { const x = dp[k], pc = pct(x.c, x.n); return '<tr><td class="b">' + esc(k) + '</td><td>' + x.n + '</td><td>' + x.c + '</td><td>' + x.r + '</td><td>' + x.o + '</td><td' + (x.od ? ' style="color:var(--crit);font-weight:700"' : '') + '>' + x.od + '</td><td><div class="bar"><i style="background:var(--ok,#1a9d5c);width:' + pc + '%"></i></div><span class="sm muted">' + f0(pc) + '%</span></td></tr>'; }).join('') + '</tbody></table></div></div>';
-  const T = [['all', 'Semua', ts.length], ['open', 'Perlu tindakan', ps.open], ['review', 'Menunggu verifikasi', ps.review], ['closed', 'Selesai', ps.closed], ['overdue', 'Overdue', ps.overdue]];
+  h += '<div class="grid g5">' + m('Belum ada rencana', ps.rencana, 'min', 'temuan') + m('Rencana terisi', ps.pelaksanaan, 'info', 'temuan') + m('Menunggu verifikasi', ps.review, 'maj', 'temuan') + m('Selesai (Closed)', ps.closed, 'ok', 'terverifikasi') + '<div class="card kpi" style="padding:12px;background:var(--crit-bg);color:var(--crit)"><div class="k-top" style="color:var(--crit)"><span class="sm">Lewat tenggat</span><span class="chip crit">Warning</span></div><div class="big num" style="font-size:28px;line-height:34px">' + ps.overdue + '<small style="color:var(--crit)">temuan</small></div></div></div>';
+  const dp = {}; ts.forEach(t => { const k = t.Departemen || '(tanpa departemen)', x = dp[k] = dp[k] || { n: 0, c: 0, r: 0, rc: 0, pl: 0, od: 0 }; x.n++; { const f = picaFase(t); if (f === 'closed') x.c++; else if (f === 'review') x.r++; else if (f === 'pelaksanaan') x.pl++; else x.rc++; } if (t.Tenggat && daysTo(t.Tenggat) < 0 && t.Status !== 'Closed') x.od++; });
+  if (ts.length) h += '<div class="card mt16" style="margin-top:12px"><div class="sec-t">Progres tindak lanjut per departemen</div><div class="table-wrap"><table class="t"><thead><tr><th>Departemen</th><th>Temuan</th><th>Belum ada rencana</th><th>Rencana terisi</th><th>Menunggu verifikasi</th><th>Selesai</th><th>Overdue</th><th style="min-width:130px">Progres</th></tr></thead><tbody>' + Object.keys(dp).sort().map(k => { const x = dp[k], pc = pct(x.c, x.n); return '<tr><td class="b">' + esc(k) + '</td><td>' + x.n + '</td><td>' + x.rc + '</td><td>' + x.pl + '</td><td>' + x.r + '</td><td>' + x.c + '</td><td' + (x.od ? ' style="color:var(--crit);font-weight:700"' : '') + '>' + x.od + '</td><td><div class="bar"><i style="background:var(--ok,#1a9d5c);width:' + pc + '%"></i></div><span class="sm muted">' + f0(pc) + '%</span></td></tr>'; }).join('') + '</tbody></table></div></div>';
+  const T = [['all', 'Semua', ts.length], ['rencana', 'Belum ada rencana', ps.rencana], ['pelaksanaan', 'Rencana terisi', ps.pelaksanaan], ['review', 'Menunggu verifikasi', ps.review], ['closed', 'Selesai', ps.closed], ['overdue', 'Overdue', ps.overdue]];
   h += '<div class="tabs mt16" style="margin-top:12px">' + T.map(x => '<button class="tab' + (tab === x[0] ? ' on' : '') + '" data-t="' + x[0] + '" onclick="picaTab(this.dataset.t)">' + x[1] + '<span class="cnt">' + x[2] + '</span></button>').join('') + '</div><div id="pList" class="rowlist mt16" style="margin-top:12px"></div>';
   h += '<div class="stepbar"><div class="flex"><div class="ring"><svg viewBox="0 0 36 36" width="48" height="48">' + donutSvg(pct(ps.closed, ps.total), 'var(--orange)', 'rgba(255,255,255,.2)').replace(/<svg[^>]*>|<\/svg>/g, '') + '</svg><b>' + f0(pct(ps.closed, ps.total)) + '%</b></div><div><div class="b">Penyelesaian PICA: ' + f1(pct(ps.closed, ps.total)) + '%</div><div class="sm" style="color:#B2C5FF">' + ps.closed + ' dari ' + ps.total + ' temuan Closed</div></div></div><div class="sm" style="color:#B2C5FF">Tenggat tindak lanjut ' + (P('TENGGAT_HARI') || 30) + ' hari setelah penutupan audit</div></div>';
   el.innerHTML = h; paintPicaList();
@@ -927,14 +950,14 @@ function rPica() {
 function picaTab(t) { S.filters.p.tab = t; $$('#page-pica .tab').forEach(b => b.classList.toggle('on', b.dataset.t === t)); paintPicaList(); }
 function paintPicaList() {
   const a = curAudit(), tab = S.filters.p.tab; if (!$('#pList')) return;
-  const ts = S.d.temuan.filter(t => t.AuditID === a.ID && t.Kategori && t.Kategori !== 'OFI').filter(t => { const over = t.Tenggat && daysTo(t.Tenggat) < 0 && t.Status !== 'Closed'; return tab === 'all' || (tab === 'overdue' && over) || (tab === 'open' && t.Status === 'Open') || (tab === 'review' && t.Status === 'Review') || (tab === 'closed' && t.Status === 'Closed'); })
+  const ts = S.d.temuan.filter(t => t.AuditID === a.ID && t.Kategori && t.Kategori !== 'OFI').filter(t => { const over = t.Tenggat && daysTo(t.Tenggat) < 0 && t.Status !== 'Closed'; return tab === 'all' || (tab === 'overdue' && over) || (tab === 'rencana' && picaFase(t) === 'rencana') || (tab === 'pelaksanaan' && picaFase(t) === 'pelaksanaan') || (tab === 'review' && picaFase(t) === 'review') || (tab === 'closed' && t.Status === 'Closed'); })
     .sort((x, y) => { const o = { Kritikal: 0, Mayor: 1, Minor: 2 }; return o[x.Kategori] - o[y.Kategori] || String(x.Tenggat).localeCompare(String(y.Tenggat)); });
   if (!ts.length) { $('#pList').innerHTML = emptyBox('task_alt', 'Tidak ada item', isR('AUDITEE') && !ts.length ? hintAuditee() : 'Belum ada temuan pada kategori ini.'); return; }
   $('#pList').innerHTML = ts.map(t => {
     const rows = S.d.pica.filter(p => p.TemuanID === t.ID), over = t.Tenggat && daysTo(t.Tenggat) < 0 && t.Status !== 'Closed';
     return '<div class="card pica-card ' + (t.Status === 'Closed' ? 'cl' : over ? 'over' : t.Status === 'Review' ? 'rev' : '') + '"><div class="flex between wrap"><div class="flex wrap"><span class="chip ' + KAT[t.Kategori] + '">' + t.Kategori.toUpperCase() + '</span><b>' + esc(t.Nomor) + '</b>' + temuanStatusChip(t) + '</div><button class="btn sm ghost" data-id="' + esc(t.ID) + '" onclick="openTemuan(this.dataset.id)"><span class="ms sm">open_in_new</span>Detail</button></div>' +
       '<h3 class="mt8" style="margin-top:8px">' + esc(String(t.Uraian).slice(0, 140)) + '</h3><div class="muted sm">Elemen ' + esc(rootOf(t.Kode)) + ' · ' + esc(t.Kode) + ' ' + esc(kriNama(t.Kode)) + ' · ' + esc(t.Lokasi || '-') + '</div><div class="grid g2 mt8" style="margin-top:8px;background:var(--soft);padding:10px;border-radius:8px"><div><div class="muted sm">PIC / Departemen</div><b>' + (t.PICDitunjuk ? esc(t.PICDitunjuk) + ' · ' : '') + esc(t.Departemen || '-') + '</b></div><div><div class="muted sm">Tenggat</div><b style="color:' + (over ? 'var(--crit)' : 'inherit') + '">' + fmtD(t.Tenggat) + '</b></div></div>' +
-      '<div class="rowlist mt8" style="margin-top:8px">' + (rows.length ? rows.map(p => picaRowHtml(p, t)).join('') : '<div class="muted sm">Belum ada tindak lanjut.</div>') + '</div><div class="flex wrap mt8" style="margin-top:8px">' + picaAddBtn(t) + '</div></div>';
+      '<div class="rowlist mt8" style="margin-top:8px">' + (rows.length ? rows.map(p => picaRowHtml(p, t)).join('') : '<div class="muted sm">Belum ada rencana tindak lanjut.</div>') + '</div><div class="flex wrap mt8" style="margin-top:8px">' + picaAddBtn(t) + '</div></div>';
   }).join('');
 }
 
