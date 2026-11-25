@@ -1,5 +1,5 @@
 /* Service Worker E-IASMKP. Aturan: permintaan ke Apps Script TIDAK PERNAH di-cache. */
-const VER = 'iasmkp-v2.2.9';
+const VER = 'iasmkp-v2.2.10';
 const OPSI = ['./js/formulir.js', './js/vendor/jszip.min.js', './tpl/Formulir_Kriteria_SMKP.xlsx']; // untuk unduh formulir offline; kegagalan tidak membatalkan instalasi
 const SHELL = ['./', './index.html', './css/style.css', './js/config.js', './js/app.js', './logo.png', './manifest.json', './icons/icon-192.png', './icons/icon-512.png'];
 
