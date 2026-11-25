@@ -99,7 +99,7 @@ function openModal(html, opt) {
   const f = $('input:not([type=hidden]),textarea,select', ov); if (f && !opt.drawer && window.innerWidth > 700) f.focus();
   return ov;
 }
-function closeModal() { const o = $('#ovl'); if (o) o.remove(); S.drawer = null; }
+function closeModal() { const o = $('#ovl'), had = S.drawer; if (o) o.remove(); S.drawer = null; if (had && S.d) go(S.page); }
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
 function mHead(title, icon) { return '<div class="m-head"><h3 class="flex"><span class="ms">' + (icon || 'edit_note') + '</span>' + esc(title) + '</h3><button class="iconbtn" onclick="closeModal()" aria-label="Tutup"><span class="ms">close</span></button></div>'; }
 function dialog(title, body, okLabel, okClass) {
@@ -781,7 +781,7 @@ function temuanForm(t, ro) {
     '<details class="detail"><summary class="b" style="cursor:pointer;min-height:36px;display:flex;align-items:center">Analisis akar masalah (5-Why)</summary><div class="mt8" style="display:grid;gap:8px">' + why + (ro ? '' : '<button class="btn sm ghost" type="button" onclick="whyTambah(this)" ' + (t.Why4 && t.Why5 ? 'hidden' : '') + '>+ Tambah &quot;Mengapa&quot; (maks. 5)</button>') + '<div class="muted" style="font-size:12px">Minimal 3 level &quot;Mengapa&quot;. Berhenti bila jawabannya sudah berupa penyebab sistem/proses (prosedur, pengawasan, sumber daya), bukan kesalahan orang.</div><div class="field"><label class="label">Akar masalah inti <span class="muted" style="font-weight:400">— terisi otomatis dari "Mengapa" terakhir; boleh diedit</span></label><textarea class="textarea" data-f="AkarMasalah" data-auto="' + (!t.AkarMasalah || String(t.AkarMasalah).trim() === akarAuto(t) ? '1' : '0') + '" oninput="this.dataset.auto=\'0\'" onchange="tField(this)"' + d + '>' + esc(t.AkarMasalah || akarAuto(t)) + '</textarea>' + (ro ? '' : '<button class="btn sm ghost mt8" type="button" onclick="akarSusun(this)">Susun ulang dari 5-Why</button>') + '</div></div></details>';
 }
 function openTemuan(id) {
-  const t = S.d.temuan.find(x => x.ID === id); if (!t) return; S.drawer = id;
+  const t = S.d.temuan.find(x => x.ID === id); if (!t) return;
   const ro = !canEditT(t), us = usulKategori(t), a = auditById(t.AuditID), locked = a && a.Status === 'Disetujui';
   let kat = '';
   if (isR('LEAD') && !locked) kat = '<div class="card flat" style="background:var(--soft)"><div class="sec-t">Penetapan kategori (Lead Auditor)</div><div class="muted sm">Usulan sistem: <b style="color:var(--text)">' + esc(us.kategori) + '</b> — ' + esc(us.alasan) + '. Kritikal dipilih manual (potensi fatality).</div><div class="flex wrap mt8" style="margin-top:8px">' + ['Kritikal', 'Mayor', 'Minor', 'OFI'].map(k => '<button class="btn sm ' + (t.Kategori === k ? KAT[k] === 'crit' ? 'danger' : KAT[k] === 'maj' ? 'orange' : 'primary' : 'ghost') + '" data-id="' + esc(id) + '" data-k="' + k + '" onclick="setKategori(this.dataset.id,this.dataset.k)">' + k + '</button>').join('') + '</div></div>';
@@ -792,7 +792,7 @@ function openTemuan(id) {
     '<div><div class="sec-t">Bukti visual lapangan</div>' + evidenceHtml({ auditId: t.AuditID, temuanId: id, kode: t.Kode }, !ro || isR('LEAD', 'AUDITOR')) + '</div>' +
     (t.Kategori && t.Kategori !== 'OFI' ? '<div><div class="flex between"><div class="sec-t" style="margin:0">Tindak lanjut (PICA)</div>' + picaAddBtn(t) + '</div><div class="rowlist mt8" style="margin-top:8px">' + (pica.length ? pica.map(p => picaRowHtml(p, t)).join('') : '<div class="muted sm">Belum ada tindakan koreksi/korektif.</div>') + '</div></div>' : '') +
     (!locked && ((isR('LEAD')) || (isR('AUDITOR') && t.Status === 'Draft' && lc(t.Oleh) === lc(S.user.email))) ? '<div class="flex" style="justify-content:flex-end"><button class="btn sm ghost" style="color:var(--crit)" data-id="' + esc(id) + '" onclick="delTemuan(this.dataset.id)"><span class="ms sm">delete</span>Hapus temuan</button></div>' : '') + '</div>';
-  openModal(html, { drawer: true }); akarBackfill(t);
+  openModal(html, { drawer: true }); S.drawer = id; akarBackfill(t);
 }
 function akarBackfill(t) { if (!t || !canEditT(t) || String(t.AkarMasalah || '').trim()) return; const v = akarAuto(t); if (!v) return; t.AkarMasalah = v; save('Temuan', { ID: t.ID, AuditID: t.AuditID, AkarMasalah: v }); }
 function refreshDrawer() { if (S.drawer && $('#ovl')) { const sc = $('#ovl .drawer').scrollTop; openTemuan(S.drawer); const d = $('#ovl .drawer'); if (d) d.scrollTop = sc; } }
@@ -809,6 +809,7 @@ function tField(inp) {
   }
   if (inp.dataset.f === 'Uraian' && !inp.value.trim()) { toast('Uraian tidak boleh kosong.', 'err'); inp.value = t.Uraian; return; }
   save('Temuan', r); t.KategoriUsulan = usulKategori(t).kategori; S.dirty = {}; S.dirty.temuan = true; if (S.page === 'temuan') paintTemuanList(); if (inp.dataset.f === 'Departemen') setTimeout(refreshDrawer, 0);
+  if (inp.dataset.f === 'Tenggat' || inp.dataset.f === 'PICDitunjuk') { toast((inp.dataset.f === 'Tenggat' ? 'Tenggat disimpan: ' + (inp.value ? fmtD(inp.value) : 'dikosongkan') : 'PIC ditunjuk disimpan: ' + (inp.value || 'dikosongkan')), 'ok'); touch(); setTimeout(refreshDrawer, 0); }
 }
 function setKategori(id, k) {
   const t = S.d.temuan.find(x => x.ID === id), a = auditById(t.AuditID); if (!t) return;
