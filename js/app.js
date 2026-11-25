@@ -730,6 +730,12 @@ function temuanStatusChip(t) {
   if (t.Status === 'Review') return '<span class="chip maj"><span class="ms sm">hourglass_top</span>Review</span>';
   return '<span class="chip min"><span class="ms sm">hourglass_top</span>Open</span>';
 }
+function tenggatMassal() {
+  const a = curAudit(), v = ($('#tgMassal') || {}).value; if (!a) return; if (!v) { toast('Pilih tanggal tenggat dulu.', 'err'); return; }
+  const l = S.d.temuan.filter(t => t.AuditID === a.ID && t.Kategori && t.Kategori !== 'OFI' && t.Status !== 'Closed' && !t.Tenggat && (isR('LEAD', 'ADMIN') || (isR('AUDITOR') && t.Oleh === S.user.email)));
+  if (!l.length) return; if (!confirm('Tetapkan tenggat ' + fmtD(v) + ' untuk ' + l.length + ' temuan?')) return;
+  l.forEach(t => save('Temuan', { ID: t.ID, AuditID: t.AuditID, Tenggat: v })); toast(l.length + ' temuan diberi tenggat ' + fmtD(v) + '.'); rTemuan();
+}
 function rTemuan() {
   const el = $('#page-temuan'), a = curAudit();
   let h = '<div class="ph"><div><div class="crumb">SMKP Minerba / <b>Kepdirjen 185.K/37.04/DJB/2019</b> / Ketidaksesuaian</div><h1>Temuan Ketidaksesuaian & Rekomendasi</h1><p>' + (a ? esc(a.Nama) : 'Belum ada audit') + '</p></div><div class="actions">' + (canTemuan() && a ? '<button class="btn primary" onclick="temuanModal()"><span class="ms">add_circle</span>Catat temuan baru</button>' : '') + '</div></div>';
@@ -738,6 +744,8 @@ function rTemuan() {
   const stat = (k, ic, cls, sub) => '<div class="card kpi"><div class="k-top"><span class="chip ' + cls + '"><span class="ms sm">' + ic + '</span>' + k + '</span></div><div class="big num">' + (c[k] || 0) + '</div><div class="sub"><span>' + sub + '</span></div></div>';
   h += '<div class="grid g4">' + stat('Kritikal', 'emergency_home', 'crit', 'Potensi fatality') + stat('Mayor', 'warning', 'maj', 'Skor &lt; ' + (P('AMBANG_MAYOR_SKOR') || 50) + '% / &gt; ' + (P('AMBANG_MAYOR_LOKASI') || 30) + '% lokasi') + stat('Minor', 'error_outline', 'min', 'Tidak sesuai peraturan/standar') + stat('OFI', 'tips_and_updates', 'info', 'Peluang perbaikan (opsional)') + '</div>';
   if (c.draft && canTemuan()) h += '<div class="banner mt16" style="margin-top:12px"><span class="ms">pending_actions</span><div><b>' + c.draft + ' temuan menunggu penetapan kategori</b><span class="sm">' + (isR('LEAD') ? 'Buka temuan untuk menetapkan Kritikal/Mayor/Minor.' : 'Lead Auditor akan menetapkan kategori final.') + '</span></div></div>';
+  const tgKosong = S.d.temuan.filter(t => t.AuditID === a.ID && t.Kategori && t.Kategori !== 'OFI' && t.Status !== 'Closed' && !t.Tenggat && (isR('LEAD', 'ADMIN') || (isR('AUDITOR') && t.Oleh === S.user.email)));
+  if (tgKosong.length && isR('LEAD', 'AUDITOR', 'ADMIN')) h += '<div class="banner mt16" style="margin-top:12px;flex-wrap:wrap"><span class="ms">event</span><div style="flex:1;min-width:220px"><b>' + tgKosong.length + ' temuan belum punya tenggat perbaikan</b><span class="sm">Tenggat wajib sebelum audit dikunci (Review). Kamu bisa menetapkan satu tanggal sekaligus untuk semua yang kosong, lalu mengubah per temuan bila perlu.</span></div><div class="flex" style="gap:8px"><input class="input" type="date" id="tgMassal" style="width:auto"><button class="btn primary sm" type="button" onclick="tenggatMassal()">Terapkan ke ' + tgKosong.length + ' temuan</button></div></div>';
   const f = S.filters.t, locs = lokasiOptions(a.ID);
   h += '<div class="card mt16" style="margin-top:12px"><div class="filters"><div class="searchbox"><span class="ms">search</span><input class="input" id="tQ" placeholder="Cari nomor, kriteria, uraian…" value="' + esc(f.q) + '" oninput="tFilter()" aria-label="Cari temuan"></div>' +
     '<select class="select" id="tK" onchange="tFilter()" aria-label="Kategori"><option value="">Kategori: semua</option>' + ['Kritikal', 'Mayor', 'Minor', 'OFI', 'Draft'].map(k => '<option' + (f.kat === k ? ' selected' : '') + '>' + k + '</option>').join('') + '</select>' +
