@@ -229,7 +229,8 @@ table.t tbody tr.click{cursor:pointer}table.t tbody tr.click:hover{background:va
 .ring{width:48px;height:48px;position:relative;flex:none}.ring svg{transform:rotate(-90deg)}.ring b{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:12px}
 .hot{display:flex;flex-direction:column;gap:10px}
 .sec-t{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin:0 0 6px}
-.radar text{font:600 10px var(--f-body);fill:var(--muted)}
+.radar text{font:600 9px var(--f-body);fill:var(--muted)}
+.radar .rp{font-weight:800;font-size:10.5px;fill:var(--blue)}
 .pica-card{border-top:5px solid var(--blue)}.pica-card.over{border-top-color:var(--crit)}.pica-card.rev{border-top-color:var(--orange)}.pica-card.cl{border-top-color:var(--ok)}
 .only-mob{display:block}.only-desk{display:none}@media(min-width:900px){.only-mob{display:none}.only-desk{display:block}}
 

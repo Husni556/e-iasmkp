@@ -185,7 +185,16 @@
         z.remove('xl/calcChain.xml');
         z.file('xl/worksheets/sheet1.xml', s1); z.file('xl/worksheets/sheet2.xml', s2); z.file('xl/worksheets/sheet3.xml', s3);
         z.file('xl/workbook.xml', wb); z.file('xl/charts/chart1.xml', ch); z.file('[Content_Types].xml', ct); z.file('xl/_rels/workbook.xml.rels', rels);
-        return z.generateAsync({ type: 'uint8array', compression: 'DEFLATE', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+        return z.file('xl/styles.xml').async('string').then(function (st) {
+          // Total pencapaian (CHECKLIST!O134, GAP ANALYSIS!E12:F12) tampil dengan 1 desimal (0,0%), bukan 0%
+          var m = /<cellXfs[^>]*>([\s\S]*?)<\/cellXfs>/.exec(st); if (m) {
+            var xs = m[1].match(/<xf [^>]*?(?:\/>|>[\s\S]*?<\/xf>)/g) || [];
+            [119, 27, 28].forEach(function (i) { if (xs[i]) xs[i] = xs[i].replace(/numFmtId="\d+"/, 'numFmtId="164"').replace(/applyNumberFormat="\d"/, '').replace(/^<xf /, '<xf applyNumberFormat="1" '); });
+            st = st.replace(m[1], xs.join(''));
+          }
+          z.file('xl/styles.xml', st);
+          return z.generateAsync({ type: 'uint8array', compression: 'DEFLATE', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+        });
       });
     });
   }
