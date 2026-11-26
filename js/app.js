@@ -724,7 +724,7 @@ function lokasiOptions(aid) {
   const a = auditById(aid), set = {}; String((a && a.LingkupLokasi) || '').split(/[,\n;]/).forEach(x => { x = x.replace(/^\s*#+\s*/, '').trim(); if (x) set[x] = 1; });
   S.d.temuan.forEach(t => { const l = String(t.Lokasi || '').replace(/^\s*#+\s*/, '').trim(); if (l) set[l] = 1; }); return Object.keys(set);
 }
-function deptOptions() { const set = {}; S.d.users.forEach(u => { if (u.Departemen) set[u.Departemen] = 1; }); S.d.temuan.forEach(t => { if (t.Departemen) set[t.Departemen] = 1; }); return Object.keys(set); }
+function deptOptions() { const set = {}; S.d.users.forEach(u => { deptList(u.Departemen).forEach(d => { set[d] = 1; }); }); S.d.temuan.forEach(t => { if (t.Departemen) set[t.Departemen] = 1; }); return Object.keys(set); }
 function canEditT(t) {
   const a = auditById(t.AuditID); if (!a || a.Status === 'Disetujui') return false;
   return isR('LEAD') || (isR('AUDITOR') && lc(t.Oleh) === lc(S.user.email));
@@ -870,11 +870,13 @@ function temuanModal(opt) {
 /* ============================== PICA ============================== */
 function picaStChip(s) { return '<span class="chip ' + ({ Open: 'min', Direncanakan: 'info', Diajukan: 'maj', Terverifikasi: 'ok', Ditolak: 'crit' }[s] || '') + '">' + esc(s) + '</span>'; }
 function nDept(v) { return String(v || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(); }
+function deptList(v) { return String(v || '').split(/[;\n|]+/).map(s => s.trim()).filter(Boolean); }
+function deptCocok(dt, da) { const n = nDept(dt); return !!n && deptList(da).some(d => nDept(d) === n); }
 function hintAuditee() { const d = S.user.dept; return d ? 'Yang tampil hanya temuan departemen “' + d + '” yang sudah ditetapkan kategorinya oleh Lead Auditor (kolom Departemen pada temuan harus sama dengan departemen akunmu).' : 'Akunmu belum punya departemen. Minta Admin mengisi Departemen di menu Pengguna.'; }
 function canPicaEdit(t, p) {
   if (!t || t.Status === 'Closed') return false; const a = auditById(t.AuditID); if (!a) return false; // tindak lanjut berlanjut setelah laporan disetujui
   if (p && p.Status === 'Terverifikasi') return false;
-  if (isR('AUDITEE')) return nDept(t.Departemen) === nDept(S.user.dept) && (!p || ['Open', 'Direncanakan', 'Ditolak'].indexOf(p.Status) > -1);
+  if (isR('AUDITEE')) return deptCocok(t.Departemen, S.user.dept) && (!p || ['Open', 'Direncanakan', 'Ditolak'].indexOf(p.Status) > -1);
   return isR('LEAD', 'AUDITOR');
 }
 const auditDisetujui = t => { const a = auditById(t.AuditID); return !!a && a.Status === 'Disetujui'; };
@@ -902,7 +904,7 @@ function picField(t, p, dis) {
     '<input class="input mt8" id="pcP" style="margin-top:8px' + (lain ? '' : ';display:none') + '" value="' + esc(lain ? cur : (cur || '')) + '" placeholder="Nama PIC"' + '>';
 }
 function picPilih(sel) { const i = $('#pcP'); if (sel.value === '__lain') { i.style.display = ''; i.value = ''; i.focus(); } else { i.style.display = 'none'; i.value = sel.value; } }
-function picOpts(t) { return S.d.users.filter(u => u.Role === 'AUDITEE' && Number(u.Aktif) !== 0 && nDept(u.Departemen) === nDept(t.Departemen)); }
+function picOpts(t) { return S.d.users.filter(u => u.Role === 'AUDITEE' && Number(u.Aktif) !== 0 && deptCocok(t.Departemen, u.Departemen)); }
 function picDefault(t) { if (t.PICDitunjuk) return t.PICDitunjuk; if (isR('AUDITEE')) return S.user.nama; const o = picOpts(t); return o.length === 1 ? o[0].Nama : ''; }
 function picaModal(tid, pid) {
   const t = S.d.temuan.find(x => x.ID === tid), p = pid ? S.d.pica.find(x => x.ID === pid) : {}; if (!t) return;
@@ -1137,7 +1139,7 @@ function paintUsers() {
 function tmpPwBox(email, pw) { return '<div class="banner"><span class="ms">key</span><div><b>Kata sandi sementara untuk ' + esc(email) + '</b><span class="b" style="font:700 20px var(--f-head);letter-spacing:.04em;user-select:all">' + esc(pw) + '</span><span class="sm">Salin dan berikan kepada pengguna. Hanya tampil sekali; pengguna wajib menggantinya saat masuk.</span></div></div>'; }
 function userModal(email) {
   const u = email ? S.d.users.find(x => lc(x.Email) === lc(email)) : { Aktif: 1, Role: 'AUDITOR' };
-  const ov = openModal(mHead(email ? 'Ubah pengguna' : 'Tambah pengguna', 'person') + '<div class="m-body"><div class="field"><label class="label">Email (akun masuk) *</label><input class="input" id="usE" type="email" value="' + esc(u.Email || '') + '"' + (email ? ' disabled' : '') + '></div><div class="field"><label class="label">Nama lengkap *</label><input class="input" id="usN" value="' + esc(u.Nama || '') + '"></div><div class="grid g2"><div class="field"><label class="label">Peran</label><select class="select" id="usR">' + Object.keys(ROLE_LABEL).map(r => '<option value="' + r + '"' + (u.Role === r ? ' selected' : '') + '>' + ROLE_LABEL[r] + '</option>').join('') + '</select></div><div class="field"><label class="label">Departemen (untuk Auditee)</label><input class="input" id="usD" list="dlDept3" value="' + esc(u.Departemen || '') + '"><datalist id="dlDept3">' + deptOptions().map(d => '<option value="' + esc(d) + '">').join('') + '</datalist></div></div><div class="field"><label class="label">No. register auditor (tampil di laporan)</label><input class="input" id="usReg" value="' + esc(u.NoReg || '') + '"></div><label class="flex" style="gap:6px;min-height:36px"><input type="checkbox" id="usA"' + (u.Aktif ? ' checked' : '') + '> Akun aktif</label><div id="usOut"></div></div><div class="m-foot"><button class="btn ghost" onclick="closeModal()">Tutup</button><button class="btn primary" id="usGo">Simpan</button></div>', { wide: true });
+  const ov = openModal(mHead(email ? 'Ubah pengguna' : 'Tambah pengguna', 'person') + '<div class="m-body"><div class="field"><label class="label">Email (akun masuk) *</label><input class="input" id="usE" type="email" value="' + esc(u.Email || '') + '"' + (email ? ' disabled' : '') + '></div><div class="field"><label class="label">Nama lengkap *</label><input class="input" id="usN" value="' + esc(u.Nama || '') + '"></div><div class="grid g2"><div class="field"><label class="label">Peran</label><select class="select" id="usR">' + Object.keys(ROLE_LABEL).map(r => '<option value="' + r + '"' + (u.Role === r ? ' selected' : '') + '>' + ROLE_LABEL[r] + '</option>').join('') + '</select></div><div class="field"><label class="label">Departemen (untuk Auditee; beberapa seksi dipisah titik koma)</label><input class="input" id="usD" placeholder="Contoh: HSE; Civil Work" list="dlDept3" value="' + esc(u.Departemen || '') + '"><datalist id="dlDept3">' + deptOptions().map(d => '<option value="' + esc(d) + '">').join('') + '</datalist></div></div><div class="field"><label class="label">No. register auditor (tampil di laporan)</label><input class="input" id="usReg" value="' + esc(u.NoReg || '') + '"></div><label class="flex" style="gap:6px;min-height:36px"><input type="checkbox" id="usA"' + (u.Aktif ? ' checked' : '') + '> Akun aktif</label><div id="usOut"></div></div><div class="m-foot"><button class="btn ghost" onclick="closeModal()">Tutup</button><button class="btn primary" id="usGo">Simpan</button></div>', { wide: true });
   $('#usGo', ov).onclick = async function () {
     const b = this; b.disabled = true;
     const r = await api('saveUser', { Email: $('#usE').value.trim(), Nama: $('#usN').value.trim(), Role: $('#usR').value, Departemen: $('#usD').value.trim(), NoReg: $('#usReg').value.trim(), Aktif: $('#usA').checked ? 1 : 0 });
