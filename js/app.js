@@ -403,7 +403,7 @@ function picaFase(t) {
   return 'rencana';
 }
 function picaStats(aid) {
-  const ts = S.d.temuan.filter(t => t.AuditID === aid && t.Kategori && t.Kategori !== 'OFI'), r = { total: ts.length, closed: 0, review: 0, open: 0, overdue: 0, rencana: 0, pelaksanaan: 0 };
+  const ts = S.d.temuan.filter(t => t.AuditID === aid && t.Kategori !== 'OFI'), r = { total: ts.length, closed: 0, review: 0, open: 0, overdue: 0, rencana: 0, pelaksanaan: 0 };
   ts.forEach(t => {
     const over = t.Tenggat && daysTo(t.Tenggat) < 0 && t.Status !== 'Closed', f = picaFase(t);
     if (f === 'closed') r.closed++; else if (f === 'review') r.review++; else { r.open++; r[f]++; }
@@ -804,7 +804,7 @@ function openTemuan(id) {
   const html = '<div class="m-head"><h3 class="flex"><span class="chip ' + (KAT[t.Kategori] || '') + '">' + esc(t.Kategori || 'Draft') + '</span>' + esc(t.Nomor) + '</h3><button class="iconbtn" onclick="closeModal()" aria-label="Tutup"><span class="ms">close</span></button></div><div class="m-body">' +
     '<div class="card flat" style="background:var(--soft)"><div class="sec-t">Kriteria SMKP · Elemen ' + esc(rootOf(t.Kode)) + '</div><div class="b"><span style="color:var(--blue)">' + esc(t.Kode) + '</span> — ' + esc(kriNama(t.Kode)) + '</div><div class="muted sm mt8">Temuan ' + fmtD(t.TglTemuan) + ' · oleh ' + esc(t.Oleh) + (t.Kategori && t.Kategori !== 'OFI' ? (t.Tenggat ? ' · tenggat ' + fmtD(t.Tenggat) : ' · <b style="color:var(--crit)">tenggat belum ditetapkan</b>') : '') + '</div></div>' + kat + temuanForm(t, ro) +
     '<div><div class="sec-t">Bukti visual lapangan</div>' + evidenceHtml({ auditId: t.AuditID, temuanId: id, kode: t.Kode }, !ro || isR('LEAD', 'AUDITOR')) + '</div>' +
-    (t.Kategori && t.Kategori !== 'OFI' ? '<div><div class="flex between"><div class="sec-t" style="margin:0">Tindak lanjut (PICA)</div>' + picaAddBtn(t) + '</div><div class="rowlist mt8" style="margin-top:8px">' + (pica.length ? pica.map(p => picaRowHtml(p, t)).join('') : '<div class="muted sm">Belum ada tindakan koreksi/korektif.</div>') + '</div></div>' : '') +
+    (t.Kategori !== 'OFI' ? '<div><div class="flex between"><div class="sec-t" style="margin:0">Tindak lanjut (PICA)</div>' + picaAddBtn(t) + '</div><div class="rowlist mt8" style="margin-top:8px">' + (pica.length ? pica.map(p => picaRowHtml(p, t)).join('') : '<div class="muted sm">Belum ada tindakan koreksi/korektif.</div>') + '</div></div>' : '') +
     (!locked && ((isR('LEAD')) || (isR('AUDITOR') && t.Status === 'Draft' && lc(t.Oleh) === lc(S.user.email))) ? '<div class="flex" style="justify-content:flex-end"><button class="btn sm ghost" style="color:var(--crit)" data-id="' + esc(id) + '" onclick="delTemuan(this.dataset.id)"><span class="ms sm">delete</span>Hapus temuan</button></div>' : '') + '</div>';
   openModal(html, { drawer: true }); S.drawer = id; akarBackfill(t);
 }
@@ -872,7 +872,7 @@ function picaStChip(s) { return '<span class="chip ' + ({ Open: 'min', Direncana
 function nDept(v) { return String(v || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(); }
 function deptList(v) { return String(v || '').split(/[;\n|]+/).map(s => s.trim()).filter(Boolean); }
 function deptCocok(dt, da) { const n = nDept(dt); return !!n && deptList(da).some(d => nDept(d) === n); }
-function hintAuditee() { const d = S.user.dept; return d ? 'Yang tampil hanya temuan departemen “' + d + '” yang sudah ditetapkan kategorinya oleh Lead Auditor (kolom Departemen pada temuan harus sama dengan departemen akunmu).' : 'Akunmu belum punya departemen. Minta Admin mengisi Departemen di menu Pengguna.'; }
+function hintAuditee() { const d = S.user.dept; return d ? 'Yang tampil hanya temuan departemen “' + d + '” sejak dicatat auditor (kolom Departemen pada temuan harus sama dengan departemen akunmu).' : 'Akunmu belum punya departemen. Minta Admin mengisi Departemen di menu Pengguna.'; }
 function canPicaEdit(t, p) {
   if (!t || t.Status === 'Closed') return false; const a = auditById(t.AuditID); if (!a) return false; // tindak lanjut berlanjut setelah laporan disetujui
   if (p && p.Status === 'Terverifikasi') return false;
@@ -939,7 +939,7 @@ function rPica() {
   const el = $('#page-pica'), a = curAudit();
   let h = '<div class="ph"><div><div class="crumb"><b>Kepdirjen 185.K/37.04/DJB/2019</b> · Lampiran II PICA</div><h1>Tindak Lanjut & PICA</h1><p>Plan · Implement · Check · Action — ' + (a ? esc(a.Nama) : '') + '</p></div></div>';
   if (!a) { el.innerHTML = h + emptyBox('task_alt', 'Belum ada audit', 'Pilih audit terlebih dahulu.'); return; }
-  const ts = S.d.temuan.filter(t => t.AuditID === a.ID && t.Kategori && t.Kategori !== 'OFI'), ps = picaStats(a.ID), tab = S.filters.p.tab;
+  const ts = S.d.temuan.filter(t => t.AuditID === a.ID && t.Kategori !== 'OFI'), ps = picaStats(a.ID), tab = S.filters.p.tab;
   const m = (lbl, n, cls, sub) => '<div class="card kpi" style="padding:12px"><div class="k-top"><span class="sm">' + lbl + '</span><span class="chip ' + cls + '">●</span></div><div class="big num" style="font-size:28px;line-height:34px">' + n + '<small>' + sub + '</small></div></div>';
   h += '<div class="grid g5">' + m('Belum ada rencana', ps.rencana, 'min', 'temuan') + m('Rencana terisi', ps.pelaksanaan, 'info', 'temuan') + m('Menunggu verifikasi', ps.review, 'maj', 'temuan') + m('Selesai (Closed)', ps.closed, 'ok', 'terverifikasi') + '<div class="card kpi" style="padding:12px;background:var(--crit-bg);color:var(--crit)"><div class="k-top" style="color:var(--crit)"><span class="sm">Lewat tenggat</span><span class="chip crit">Warning</span></div><div class="big num" style="font-size:28px;line-height:34px">' + ps.overdue + '<small style="color:var(--crit)">temuan</small></div></div></div>';
   const dp = {}; ts.forEach(t => { const k = t.Departemen || '(tanpa departemen)', x = dp[k] = dp[k] || { n: 0, c: 0, r: 0, rc: 0, pl: 0, od: 0 }; x.n++; { const f = picaFase(t); if (f === 'closed') x.c++; else if (f === 'review') x.r++; else if (f === 'pelaksanaan') x.pl++; else x.rc++; } if (t.Tenggat && daysTo(t.Tenggat) < 0 && t.Status !== 'Closed') x.od++; });
@@ -952,7 +952,7 @@ function rPica() {
 function picaTab(t) { S.filters.p.tab = t; $$('#page-pica .tab').forEach(b => b.classList.toggle('on', b.dataset.t === t)); paintPicaList(); }
 function paintPicaList() {
   const a = curAudit(), tab = S.filters.p.tab; if (!$('#pList')) return;
-  const ts = S.d.temuan.filter(t => t.AuditID === a.ID && t.Kategori && t.Kategori !== 'OFI').filter(t => { const over = t.Tenggat && daysTo(t.Tenggat) < 0 && t.Status !== 'Closed'; return tab === 'all' || (tab === 'overdue' && over) || (tab === 'rencana' && picaFase(t) === 'rencana') || (tab === 'pelaksanaan' && picaFase(t) === 'pelaksanaan') || (tab === 'review' && picaFase(t) === 'review') || (tab === 'closed' && t.Status === 'Closed'); })
+  const ts = S.d.temuan.filter(t => t.AuditID === a.ID && t.Kategori !== 'OFI').filter(t => { const over = t.Tenggat && daysTo(t.Tenggat) < 0 && t.Status !== 'Closed'; return tab === 'all' || (tab === 'overdue' && over) || (tab === 'rencana' && picaFase(t) === 'rencana') || (tab === 'pelaksanaan' && picaFase(t) === 'pelaksanaan') || (tab === 'review' && picaFase(t) === 'review') || (tab === 'closed' && t.Status === 'Closed'); })
     .sort((x, y) => { const o = { Kritikal: 0, Mayor: 1, Minor: 2 }; return o[x.Kategori] - o[y.Kategori] || String(x.Tenggat).localeCompare(String(y.Tenggat)); });
   if (!ts.length) { $('#pList').innerHTML = emptyBox('task_alt', 'Tidak ada item', isR('AUDITEE') && !ts.length ? hintAuditee() : 'Belum ada temuan pada kategori ini.'); return; }
   $('#pList').innerHTML = ts.map(t => {
