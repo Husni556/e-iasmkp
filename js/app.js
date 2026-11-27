@@ -355,7 +355,7 @@ async function doLogin(e) {
   btn.disabled = false; btn.innerHTML = '<span class="ms">login</span><span>Masuk</span>';
   if (!r.success) { err.textContent = r.message || 'Gagal masuk.'; err.hidden = false; return; }
   S.token = r.data.token; TOK.set(S.token); S.dv = null; S.user = r.data.user;
-  const old = ls.get('iasmkp_snap'); if (old && old.user && lc(old.user.email) !== lc(S.user.email)) { ls.del('iasmkp_snap'); Q.items = []; persistQ(); }
+  const old = ls.get('iasmkp_snap'); if (old && old.user && lc(old.user.email) !== lc(S.user.email)) { ls.del('iasmkp_snap'); ls.del('iasmkp_offready'); Q.items = []; persistQ(); }
   $('#boot').hidden = false; await loadData(true);
   if (r.data.user.mustChange) setTimeout(() => pwModal(true), 400);
 }
@@ -368,7 +368,7 @@ async function loadData(fresh) {
 }
 async function logout() {
   if (pendTotal()) { const ok = await confirmBox('Perubahan belum terkirim', 'Masih ada ' + Q.items.length + ' perubahan dan ' + waitFoto() + ' foto menunggu sinkron. Keluar sekarang menyimpannya di perangkat ini sampai Anda masuk lagi dengan akun yang sama; jangan hapus data browser.', 'Keluar', 'orange'); if (!ok) return; }
-  await api('logout'); clearTimeout(_pollT); S.token = null; TOK.del(); ss.del('iasmkp_pg'); ls.del('iasmkp_snap'); S.d = null; showLogin();
+  await api('logout'); clearTimeout(_pollT); S.token = null; TOK.del(); ss.del('iasmkp_pg'); ls.del('iasmkp_snap'); ls.del('iasmkp_offready'); S.d = null; showLogin();
 }
 function pwModal(force) {
   const ov = openModal(mHead('Ganti kata sandi', 'key') + '<div class="m-body">' + (force ? '<div class="banner"><span class="ms">info</span><div>Akun Anda memakai kata sandi sementara. Buat kata sandi baru (min. 8 karakter).</div></div>' : '') +
@@ -458,15 +458,39 @@ async function loadPendingUploads() {
   if (waitFoto()) { setSync(navigator.onLine === false ? 'offline' : S.sync); flushUploads(); }
 }
 /** Tombol "Siapkan offline": muat ulang data penuh, pastikan tersimpan di HP, minta penyimpanan permanen. */
+/** Tampilan tombol "Siapkan offline": idle (belum), busy (proses), ok (siap, dengan jam), warn (belum lengkap). */
+function paintOffBtn(st) {
+  const b = $('#btnOffline'); if (!b) return;
+  const r = ls.get('iasmkp_offready') || null, hh = r && r.ts ? new Date(r.ts).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }).replace('.', ':') : '';
+  const usang = r && r.ts && Date.now() - r.ts > 12 * 3600e3;
+  st = st || (!r ? 'idle' : !r.ok ? 'warn' : usang ? 'stale' : 'ok');
+  const M = { idle: ['cloud_download', 'Siapkan offline', '', 'Simpan data audit di perangkat ini agar bisa dipakai tanpa sinyal'],
+    busy: ['sync', 'Menyiapkan…', '', 'Sedang menyimpan data ke perangkat'],
+    ok: ['cloud_done', 'Siap offline' + (hh ? ' · ' + hh : ''), 'ok', 'Data audit tersimpan di perangkat' + (r && r.info ? ': ' + r.info : '') + '. Ketuk untuk memperbarui.'],
+    stale: ['cloud_sync', 'Perbarui offline' + (hh ? ' · ' + hh : ''), 'warn', 'Data offline terakhir disiapkan pukul ' + hh + '. Ketuk untuk memperbarui.'],
+    warn: ['cloud_off', 'Belum siap offline', 'warn', 'Penyiapan belum lengkap' + (r && r.info ? ': ' + r.info : '') + '. Ketuk untuk mencoba lagi.'] }[st];
+  b.disabled = st === 'busy'; b.title = M[3];
+  b.style.cssText = M[2] === 'ok' ? 'background:#E3F6EA;color:#14653A;border-color:#8FD1A8' : M[2] === 'warn' ? 'background:#FFF1E0;color:#9A4B00;border-color:#F2B36B' : '';
+  b.innerHTML = '<span class="ms sm"' + (st === 'busy' ? ' style="animation:spin 1s linear infinite"' : '') + '>' + M[0] + '</span><span class="hide-sm">' + esc(M[1]) + '</span>';
+}
 async function prepOffline() {
   if (navigator.onLine === false) { toast('Perlu sinyal untuk menyiapkan data offline.', 'warn'); return; }
-  toast('Menyiapkan data untuk offline…', 'info');
-  await flush(); await flushUploads(); await resync(true); snapshot();
-  let persist = null; try { if (navigator.storage && navigator.storage.persist) persist = await navigator.storage.persist(); } catch (e) { }
-  let sw = false; try { sw = !!(navigator.serviceWorker && await navigator.serviceWorker.getRegistration()); } catch (e) { }
-  const a = curAudit(), nT = a ? S.d.temuan.filter(t => t.AuditID === a.ID).length : 0, nB = a ? Object.keys(S.nilai[a.ID] || {}).length : 0;
-  const ok = !!S.d && sw;
-  toast((ok ? 'Siap offline' : 'Belum sepenuhnya siap') + (a ? ' · ' + a.Nama + ': ' + nB + ' butir dinilai, ' + nT + ' temuan' : '') + '. Aplikasi tersimpan: ' + (sw ? 'ya' : 'belum (buka ulang dengan sinyal)') + ' · Penyimpanan permanen: ' + (persist === null ? 'tidak didukung' : persist ? 'ya' : 'belum diizinkan browser') + '. Jangan logout sebelum label menunjukkan Tersimpan.', ok ? 'ok' : 'warn', 9000);
+  paintOffBtn('busy');
+  try {
+    await flush(); await flushUploads(); await resync(true); snapshot();
+    let persist = null; try { if (navigator.storage && navigator.storage.persist) persist = await navigator.storage.persist(); } catch (e) { }
+    let sw = false; try { sw = !!(navigator.serviceWorker && await navigator.serviceWorker.getRegistration()); } catch (e) { }
+    const a = curAudit(), nT = a ? S.d.temuan.filter(t => t.AuditID === a.ID).length : 0, nB = a ? Object.keys(S.nilai[a.ID] || {}).length : 0;
+    const snapOk = !!ls.get('iasmkp_snap'), ok = !!S.d && sw && snapOk, info = a ? a.Nama + ' (' + nB + ' butir, ' + nT + ' temuan)' : '';
+    ls.set('iasmkp_offready', { ts: Date.now(), ok: ok, info: ok ? info : (sw ? 'data belum tersimpan' : 'aplikasi belum tersimpan, buka ulang dengan sinyal') });
+    paintOffBtn();
+    const row = (v, t) => '<div style="display:flex;gap:8px;align-items:flex-start;margin:6px 0"><span class="ms" style="color:' + (v ? '#14653A' : '#B25E00') + '">' + (v ? 'check_circle' : 'error') + '</span><div>' + t + '</div></div>';
+    await confirmBox(ok ? 'Siap dipakai offline' : 'Belum sepenuhnya siap',
+      row(snapOk, 'Data audit tersimpan di perangkat' + (info ? '<br><span class="muted sm">' + esc(info) + '</span>' : '')) +
+      row(sw, 'Aplikasi tersimpan (bisa dibuka tanpa sinyal)' + (sw ? '' : '<br><span class="muted sm">Buka ulang aplikasi dengan sinyal sekali lagi.</span>')) +
+      row(persist === true, 'Penyimpanan permanen' + (persist === true ? '' : '<br><span class="muted sm">' + (persist === null ? 'Tidak didukung peramban ini.' : 'Belum diberikan peramban; pasang aplikasi ke layar utama agar lebih awet.') + '</span>')) +
+      '<div class="muted sm" style="margin-top:10px">Saat sinyal hilang, tanda di atas berubah menjadi <b>Offline</b>. Perubahan dan foto tersimpan di perangkat lalu terkirim otomatis saat sinyal kembali.</div>', 'Mengerti');
+  } catch (e) { ls.set('iasmkp_offready', { ts: Date.now(), ok: false, info: (e && e.message) || 'galat' }); paintOffBtn(); }
 }
 function evidenceOf(ctx) { return S.d.bukti.filter(b => (ctx.temuanId ? b.TemuanID === ctx.temuanId : (b.AuditID === ctx.auditId && b.Kode === ctx.kode && !b.TemuanID)) && (!ctx.tindakId || b.TindakID === ctx.tindakId)); }
 function evidenceHtml(ctx, canAdd) {
@@ -1317,7 +1341,7 @@ function wire() {
 function warmUp() { if (GAS_OK()) { try { fetch(GAS_URL + '?action=ping', { cache: 'no-store' }).catch(() => { }); } catch (e) { } } }
 let _installEv = null;
 function initPwa() {
-  const bo = $('#btnOffline'); if (bo) bo.onclick = prepOffline;
+  const bo = $('#btnOffline'); if (bo) { bo.onclick = prepOffline; paintOffBtn(); }
   if ('serviceWorker' in navigator && location.protocol !== 'file:') window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => { }));
   const btn = $('#btnInstall'), standalone = (window.matchMedia && matchMedia('(display-mode: standalone)').matches) || navigator.standalone;
   window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); _installEv = e; if (btn) btn.hidden = false; });

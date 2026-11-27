@@ -256,3 +256,4 @@ code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px}
 .rub-i.on{background:#E3EAFF;outline:2px solid #1F3FD0}
 @media (max-width:560px){.rub-i{grid-template-columns:1fr}}
 .brandrow .mark.logo{width:54px;height:54px}
+@keyframes spin{to{transform:rotate(360deg)}}
