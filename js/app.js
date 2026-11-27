@@ -630,7 +630,7 @@ function auditModal(id) {
     '<div class="field"><label class="label">Lingkup lokasi / area</label><textarea class="textarea" id="auL" placeholder="Satu baris per area. Awali # untuk judul area, ## untuk sub-judul, tanpa tanda = butir. Contoh:&#10;# Area operasional luar tambang&#10;## Departemen HSE&#10;Workshop">' + esc(a.LingkupLokasi || '') + '</textarea></div>' +
     '<div class="field"><label class="label">Jumlah lokasi yang diaudit</label><input class="input" id="auJL" type="number" inputmode="numeric" min="0" value="' + esc(a.JumlahLokasi || '') + '"><div class="hint">Dipakai aturan Mayor: temuan minor pada satu sub-elemen di &gt; 30% lokasi.</div></div></div>' +
     '<div class="m-foot">' + (id && isR('ADMIN') ? '<button class="btn ghost" id="auDel" style="margin-right:auto;color:var(--crit)"><span class="ms sm">delete</span>Hapus audit ini</button>' : '') + '<button class="btn ghost" onclick="closeModal()">Batal</button><button class="btn primary" id="auGo">Simpan</button></div>', { wide: true });
-  if ($('#auDel', ov)) $('#auDel', ov).onclick = async () => { const n = window.prompt('HAPUS AUDIT BESERTA SEMUA DATANYA (temuan, PICA, penilaian, bukti). Cadangan dibuat otomatis, audit lain tidak tersentuh.\n\nKetik nama audit persis untuk melanjutkan:\n' + a.Nama); if (n === null) return; const r = await api('hapusAudit', { id: a.ID, konfirmasi: n }); if (r.success) { S.audit = null; ls.set('iasmkp_audit', ''); closeModal(); await resync(); renderAuditSel(); toast('Audit dihapus. Cadangan dibuat di Drive.', 'ok', 5000); } else toast(r.message, 'err', 6000); };
+  if ($('#auDel', ov)) $('#auDel', ov).onclick = async () => { const n = window.prompt('HAPUS AUDIT BESERTA SEMUA DATANYA (temuan, PICA, penilaian, bukti). Cadangan dibuat otomatis, audit lain tidak tersentuh.\n\nKetik nama audit persis untuk melanjutkan:\n' + a.Nama); if (n === null) return; const r = await api('hapusAudit', { id: a.ID, konfirmasi: n }); if (r.success) { S.audit = null; ls.set('iasmkp_audit', ''); closeModal(); await resync(true); renderAuditSel(); toast('Audit dihapus. Cadangan dibuat di Drive.', 'ok', 5000); } else toast(r.message, 'err', 6000); };
   $('#auGo', ov).onclick = () => {
     const nama = $('#auN').value.trim(); if (!nama) { toast('Nama audit wajib diisi.', 'err'); return; }
     const rec = { ID: a.ID || uid(), Nama: nama, Tahun: Number($('#auY').value) || new Date().getFullYear(), Jenis: $('#auJ').value, TglMulai: $('#auM').value, TglSelesai: $('#auS').value, TglPembukaan: $('#auB').value, TglPenutupan: $('#auT').value, LingkupLokasi: $('#auL').value.trim(), JumlahLokasi: Number($('#auJL').value) || 0 };
@@ -1176,8 +1176,8 @@ function paintImpor(b) {
   };
   const busy = (btn, fn) => async () => { const o = btn.innerHTML; btn.disabled = true; btn.innerHTML = '<span class="spin" style="width:16px;height:16px;border-width:2px"></span>Memproses…'; try { await fn(); } finally { btn.innerHTML = o; btn.disabled = false; } };
   $('#imScan').onclick = busy($('#imScan'), async () => { const p = pay(); if (!p.source) { toast('Isi URL/ID spreadsheet sumber.', 'err'); return; } show(await api('importScan', p)); });
-  $('#imRun').onclick = busy($('#imRun'), async () => { const p = pay(); if (!p.source) { toast('Isi URL/ID spreadsheet sumber.', 'err'); return; } const c = await confirmBox('Jalankan impor?', 'Data dari spreadsheet sumber akan ditambahkan ke app ini. Sebaiknya Pindai dahulu.', 'Jalankan', 'primary'); if (!c) return; const r = await api('importRun', p); show(r); if (r.success) { await resync(); toast('Impor selesai.', 'ok'); } });
-  $('#imSeed').onclick = busy($('#imSeed'), async () => { const c = await confirmBox('Muat data audit 2025?', 'Audit TW 2025 akan dibuat/diperbarui dari formulir Excel.', 'Muat', 'primary'); if (!c) return; const r = await api('seed2025'); if (r.success) { await resync(); toast('Data 2025 dimuat.', 'ok'); } else toast(r.message, 'err', 5000); });
+  $('#imRun').onclick = busy($('#imRun'), async () => { const p = pay(); if (!p.source) { toast('Isi URL/ID spreadsheet sumber.', 'err'); return; } const c = await confirmBox('Jalankan impor?', 'Data dari spreadsheet sumber akan ditambahkan ke app ini. Sebaiknya Pindai dahulu.', 'Jalankan', 'primary'); if (!c) return; const r = await api('importRun', p); show(r); if (r.success) { await resync(true); toast('Impor selesai.', 'ok'); } });
+  $('#imSeed').onclick = busy($('#imSeed'), async () => { const c = await confirmBox('Muat data audit 2025?', 'Audit TW 2025 akan dibuat/diperbarui dari formulir Excel.', 'Muat', 'primary'); if (!c) return; const r = await api('seed2025'); if (r.success) { await resync(true); toast('Data 2025 dimuat.', 'ok'); } else toast(r.message, 'err', 5000); });
 }
 
 /* ============================== PENGGUNA ============================== */
@@ -1201,7 +1201,7 @@ function userModal(email) {
     const b = this; b.disabled = true;
     const r = await api('saveUser', { Email: $('#usE').value.trim(), Nama: $('#usN').value.trim(), Role: $('#usR').value, Departemen: $('#usD').value.trim(), NoReg: $('#usReg').value.trim(), Aktif: $('#usA').checked ? 1 : 0 });
     b.disabled = false; if (!r.success) { toast(r.message, 'err', 5000); return; }
-    await resync(); toast(r.message, 'ok');
+    await resync(true); toast(r.message, 'ok');
     if (r.data && r.data.passwordSementara) { $('#usOut').innerHTML = tmpPwBox(r.data.email, r.data.passwordSementara); b.hidden = true; } else closeModal();
   };
 }
