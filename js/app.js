@@ -225,6 +225,7 @@ function ingest(data) {
   S.d = data; S.user = data.user; S._kr = null; if (data.dv) S.dv = data.dv; if (!S.d.dokumen) S.d.dokumen = [];
   const nn = {}; (data.penilaian || []).forEach(x => { (nn[x[0]] = nn[x[0]] || {})[x[1]] = { n: x[2], c: x[3] || '', s: x[6] ? 1 : 0, a: x[7] ? 1 : 0, al: x[8] || '' }; });
   S.nilai = nn; delete S.d.penilaian;
+  try { brandFromParams(); } catch (e) { }
   // replay perubahan yang belum terkirim di atas data server (agar tidak "kembali" sesaat)
   Q.items.forEach(it => { try { applyLocal(it.t, it.r, it.del); } catch (e) { } });
   const sv = ls.get('iasmkp_audit');
@@ -295,6 +296,49 @@ function renderAuditSel() {
 /* ------------------------------ Login / Sesi ------------------------------ */
 function showLogin() { $('#app').hidden = true; $('#view-login').hidden = false; $('#boot').hidden = true; closeModal(); $('#lgPass').value = ''; setTimeout(() => $('#lgEmail').focus(), 50); }
 function showApp() { $('#view-login').hidden = true; $('#app').hidden = false; $('#boot').hidden = true; }
+/* ---- Identitas tampilan (nama, teks, logo) — diatur Admin di Master Data → Logo & identitas ---- */
+let BR = {};
+function applyBrand(b) {
+  if (!b || !b.nama) return; BR = Object.assign({}, BR, b);
+  $$('.br-nama').forEach(e => { e.textContent = BR.nama; });
+  $$('.br-kata').forEach(e => { e.textContent = String(BR.nama).replace(/^(PT|CV)\.?\s+/i, '').toUpperCase(); });
+  $$('.br-sub').forEach(e => { e.textContent = BR.sub || ''; });
+  $$('.br-teks').forEach(e => { e.textContent = (BR.teks || '') + (BR.tag ? ' ' : ''); if (BR.tag) { const t = document.createElement('span'); t.className = 'tag'; t.textContent = BR.tag; e.appendChild(t); } });
+  $$('img.br-logo').forEach(i => { const src = BR.logo || './logo.png'; if (i.getAttribute('src') !== src) i.src = src; });
+  try { document.title = BR.nama + ' — SMKP'; } catch (e) { }
+}
+async function fetchBrand() {
+  if (!GAS_OK()) return;
+  try { const r = await (await fetch(GAS_URL + '?action=branding', { cache: 'no-store' })).json(); if (r.success) { BR = {}; applyBrand(r.data); ls.set('iasmkp_brand', r.data); } } catch (e) { }
+}
+function brandFromParams() {
+  if (!S.d || !S.d.params || !S.d.params.NAMA_PERUSAHAAN) return;
+  const b = { nama: P('NAMA_HEADER') || P('NAMA_PERUSAHAAN'), teks: P('TEKS_HEADER'), tag: P('TAG_HEADER'), sub: P('SUB_LOGIN'), logoId: P('LOGO_ID') };
+  const ganti = (BR.logoId || '') !== b.logoId; if (ganti) b.logo = '';
+  applyBrand(b); if (ganti) fetchBrand(); else ls.set('iasmkp_brand', BR);
+}
+function paintBrand(b) {
+  const adm = isR('ADMIN'); if (!adm) { b.innerHTML = ''; return; }
+  const F = [['NAMA_HEADER', 'Nama pada header (kosong = sama dengan Nama perusahaan)'], ['TEKS_HEADER', 'Teks kecil di bawah nama (header aplikasi)'], ['TAG_HEADER', 'Label kecil di samping teks (boleh kosong)'], ['SUB_LOGIN', 'Teks di bawah nama pada halaman masuk']];
+  b.innerHTML = '<div class="card"><div class="sec-t">Logo</div><div class="flex" style="gap:16px;align-items:center;flex-wrap:wrap"><div class="mark logo" style="width:84px;height:84px;background:#fff;box-shadow:0 0 0 1px var(--line,#d5d9e4)"><img class="br-logo" src="' + esc(BR.logo || './logo.png') + '" alt="Logo" style="max-width:100%;max-height:100%;object-fit:contain"></div>' +
+    '<div><div class="flex" style="gap:8px;flex-wrap:wrap"><button class="btn primary" id="lgUp"><span class="ms">upload</span>Unggah logo</button>' + (P('LOGO_ID') ? '<button class="btn ghost" id="lgDel"><span class="ms">restart_alt</span>Kembalikan logo bawaan</button>' : '') + '</div><input type="file" id="lgFile" accept="image/*" hidden>' +
+    '<div class="muted sm" style="margin-top:6px">PNG/JPG/WebP, latar transparan lebih baik. Logo dipakai di header, halaman masuk, verifikasi dokumen, dan <b>kop laporan Word</b>.</div></div></div>' +
+    '<div class="banner info" style="margin-top:12px"><span class="ms">info</span><div>Pada laporan Word, logo menggantikan gambar logo di template. Template mana pun yang diunggah akan dikenali otomatis bila gambar logonya muncul berulang; untuk kepastian, beri \u201cTeks alternatif\u201d berisi kata LOGO pada gambar logo di Word (klik kanan gambar → Edit Teks Alternatif). Ukuran menyesuaikan kotak logo di template dengan rasio terjaga.</div></div></div>' +
+    '<div class="card mt16" style="margin-top:12px"><div class="sec-t">Identitas pada aplikasi</div><div class="rowlist">' + F.map(m => '<div class="field"><label class="label">' + esc(m[1]) + '</label><div class="flex"><input class="input" data-k="' + m[0] + '" value="' + esc(P(m[0])) + '"><button class="btn sm primary" data-k="' + m[0] + '" data-l="0" onclick="saveParam(this)">Simpan</button></div></div>').join('') + '</div></div>';
+  $('#lgUp').onclick = () => $('#lgFile').click();
+  $('#lgFile').onchange = function () {
+    const f = this.files[0]; this.value = ''; if (!f) return; if (!/^image\//.test(f.type)) { toast('Pilih berkas gambar (PNG/JPG/WebP).', 'err'); return; }
+    const im = new Image(), url = URL.createObjectURL(f);
+    im.onload = async () => {
+      const m = 512, k = Math.min(1, m / Math.max(im.width, im.height)), c = document.createElement('canvas'); c.width = Math.max(1, Math.round(im.width * k)); c.height = Math.max(1, Math.round(im.height * k));
+      c.getContext('2d').drawImage(im, 0, 0, c.width, c.height); URL.revokeObjectURL(url);
+      const r = await api('uploadLogo', { b64: c.toDataURL('image/png').split(',')[1] });
+      if (r.success) { S.d.params.LOGO_ID = r.data.logoId; BR = {}; applyBrand(r.data); ls.set('iasmkp_brand', r.data); toast('Logo tersimpan.', 'ok'); snapSoon(); paintBrand(b); } else toast(r.message, 'err', 6000);
+    };
+    im.onerror = () => { URL.revokeObjectURL(url); toast('Gambar tidak dapat dibaca.', 'err'); }; im.src = url;
+  };
+  if ($('#lgDel')) $('#lgDel').onclick = async () => { const c = await confirmBox('Kembalikan logo bawaan?', 'Logo yang diunggah dihapus. Header dan laporan memakai logo bawaan/templatenya lagi.', 'Kembalikan', 'orange'); if (!c) return; const r = await api('hapusLogo'); if (r.success) { S.d.params.LOGO_ID = ''; BR = {}; applyBrand(r.data); ls.set('iasmkp_brand', r.data); toast(r.message, 'ok'); snapSoon(); paintBrand(b); } else toast(r.message, 'err'); };
+}
 function paintUser() {
   const u = S.user; $('#uName').textContent = u.nama; $('#uRole').textContent = ROLE_LABEL[u.role] || u.role;
   $('#uAvatar').textContent = String(u.nama || '?').split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase();
@@ -1123,7 +1167,7 @@ const PARAM_META = [
 ];
 function rMaster() {
   const el = $('#page-master'), f = S.filters.m, adm = isR('ADMIN');
-  const T = [['kriteria', 'Kriteria', S.d.kriteria.length], ['elemen', 'Elemen & bobot', S.d.elemen.length], ['param', 'Parameter', PARAM_META.length]]; if (adm) T.push(['impor', 'Impor data', '']);
+  const T = [['kriteria', 'Kriteria', S.d.kriteria.length], ['elemen', 'Elemen & bobot', S.d.elemen.length], ['param', 'Parameter', PARAM_META.length]]; if (adm) { T.push(['brand', 'Logo & identitas', '']); T.push(['impor', 'Impor data', '']); }
   if (!T.some(x => x[0] === f.tab)) f.tab = 'kriteria';
   let h = '<div class="ph"><div><div class="crumb">Kepdirjen 185.K/37.04/DJB/2019 · Lampiran I</div><h1>Master Data SMKP</h1><p>Kriteria, bobot elemen, dan parameter aturan kategori temuan.</p></div></div><div class="tabs">' + T.map(x => '<button class="tab' + (f.tab === x[0] ? ' on' : '') + '" data-t="' + x[0] + '" onclick="masterTab(this.dataset.t)">' + x[1] + (x[2] !== '' ? '<span class="cnt">' + x[2] + '</span>' : '') + '</button>').join('') + '</div><div id="mBody" class="mt16" style="margin-top:12px"></div>';
   el.innerHTML = h; paintMaster();
@@ -1138,6 +1182,7 @@ function paintMaster() {
   if (f.tab === 'param') {
     b.innerHTML = '<div class="card"><div class="rowlist">' + PARAM_META.map(m => '<div class="field"><label class="label">' + esc(m[1]) + (m[2] ? ' <span class="chip maj" style="margin-left:6px"><span class="ms sm">lock</span>Regulasi</span>' : '') + '</label><div class="flex">' + (m[3] === 'ta' ? '<textarea class="textarea" rows="3" data-k="' + m[0] + '"' + (adm ? '' : ' disabled') + '>' + esc(P(m[0])) + '</textarea>' : '<input class="input" data-k="' + m[0] + '" value="' + esc(P(m[0])) + '"' + (adm ? '' : ' disabled') + '>') + (adm ? '<button class="btn sm primary" data-k="' + m[0] + '" data-l="' + m[2] + '" onclick="saveParam(this)">Simpan</button>' : '') + '</div></div>').join('') + '</div></div>'; return;
   }
+  if (f.tab === 'brand' && adm) { paintBrand(b); return; }
   if (f.tab === 'impor' && adm) { paintImpor(b); return; }
   b.innerHTML = '<div class="card"><div class="filters"><div class="searchbox"><span class="ms">search</span><input class="input" id="mQ" placeholder="Cari kode atau uraian kriteria…" value="' + esc(f.q) + '" oninput="mFilter()" aria-label="Cari kriteria"></div><select class="select" id="mE" onchange="mFilter()" aria-label="Elemen"><option value="">Semua elemen</option>' + S.d.elemen.map(e => '<option value="' + e.Kode + '"' + (f.el === e.Kode ? ' selected' : '') + '>' + e.Kode + '. ' + esc(e.Nama) + '</option>').join('') + '</select></div></div><div id="mList" class="mt16" style="margin-top:12px"></div>';
   paintKriteria();
@@ -1157,7 +1202,7 @@ async function saveParam(btn) {
   const k = btn.dataset.k, inp = $('[data-k="' + k + '"]:not(button)'), v = inp.value.trim(); let konf = false;
   if (btn.dataset.l === '1') { const c = await confirmBox('Ubah parameter regulasi?', 'Parameter ini bersumber dari Kepdirjen 185.K/37.04/DJB/2019. Perubahan memengaruhi usulan kategori dan tenggat seluruh audit, dan tercatat di log.', 'Ya, ubah', 'orange'); if (!c) { inp.value = P(k); return; } konf = true; }
   const r = await api('saveParam', { Kunci: k, Nilai: v, konfirmasi: konf });
-  if (r.success) { S.d.params[k] = v; toast('Parameter disimpan.', 'ok'); snapSoon(); S.dirty = {}; S.dirty.master = false; } else toast(r.message, 'err', 5000);
+  if (r.success) { S.d.params[k] = v; if (/^(NAMA_HEADER|NAMA_PERUSAHAAN|TEKS_HEADER|TAG_HEADER|SUB_LOGIN)$/.test(k)) brandFromParams(); toast('Parameter disimpan.', 'ok'); snapSoon(); S.dirty = {}; S.dirty.master = false; } else toast(r.message, 'err', 5000);
 }
 /* ---- Impor (gas-migrasi-database) ---- */
 const IMP_SHEETS = ['Users', 'Audit', 'Penugasan', 'Penilaian', 'Temuan', 'Tindak_Lanjut', 'Praktik_Baik', 'Pertemuan', 'Kehadiran', 'Respon_Audit'];
@@ -1228,14 +1273,14 @@ function wire() {
 (function boot() {
   let th = 'light'; try { th = localStorage.getItem('iasmkp_theme') || (window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'); } catch (e) { }
   const start = () => {
-    wire(); setTheme(th); initPwa(); warmUp();
+    wire(); setTheme(th); initPwa(); warmUp(); applyBrand(ls.get('iasmkp_brand')); fetchBrand();
     if (publicRoute()) return;
     S.token = TOK.get(); Q.items = ls.get('iasmkp_q') || []; loadPendingUploads();
     const snap = ls.get('iasmkp_snap');
     if (S.token && snap && snap.d && snap.user) {      // render instan dari cache lokal, lalu segarkan di latar belakang
       S.d = snap.d; S.user = snap.user; S.nilai = snap.nilai || {}; S.audit = snap.audit; S.dv = snap.dv || null; if (!S.d.dokumen) S.d.dokumen = []; Q.items.forEach(it => { try { applyLocal(it.t, it.r, it.del); } catch (e) { } });
       S.page = ss.get('iasmkp_pg') || 'dashboard'; paintUser(); showApp(); renderAll(); setSync(Q.items.length ? 'pending' : 'ok');
-      resync().then(() => { if (Q.items.length) flush(); pollVer(); }); return;
+      resync(true).then(() => { if (Q.items.length) flush(); pollVer(); }); return;  // selalu ambil data segar sekali per pembukaan (salinan lokal bisa usang)
     }
     if (S.token) { loadData(false).then(ok => { if (!ok && !S.d) showLogin(); }); return; }
     showLogin(); if (!GAS_OK()) { const e = $('#lgErr'); e.textContent = 'GAS_URL belum diisi di js/config.js — lihat PANDUAN.'; e.hidden = false; }
