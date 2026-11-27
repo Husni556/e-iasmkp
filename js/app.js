@@ -64,10 +64,12 @@ const READS = /^(bootstrap|ver|filePreview|deScan)$/;
 const _inflight = {}; let _epoch = 0;
 async function apiRaw(action, payload) {
   if (!GAS_OK()) return { success: false, net: true, message: 'GAS_URL belum diisi di js/config.js.' };
-  const ctl = new AbortController(), tm = setTimeout(() => ctl.abort(), API_TIMEOUT);
+  const ctl = new AbortController(), tm = setTimeout(() => ctl.abort(), action === 'upload' ? 120000 : API_TIMEOUT);
   try {
     const res = await fetch(GAS_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ action: action, token: S.token, payload: payload || {} }), signal: ctl.signal, redirect: 'follow' });
-    const r = await res.json(); return r || { success: false, net: true, message: 'Respons kosong.' };
+    const tx = await res.text(); let r = null; try { r = JSON.parse(tx); } catch (e) { }
+    if (!r) return { success: false, net: true, message: 'Server membalas bukan JSON (HTTP ' + res.status + '): ' + String(tx).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120) };
+    return r;
   } catch (e) { return { success: false, net: true, message: e && e.name === 'AbortError' ? 'Server lambat merespons.' : 'Tidak terhubung ke server.' }; }
   finally { clearTimeout(tm); }
 }
@@ -427,10 +429,12 @@ async function sendUpload(item, rec, persisted, quiet) {
     if (r.success) { if (!S.d.bukti.some(b => b.ID === r.data.ID)) S.d.bukti.push(r.data); S.upl = S.upl.filter(x => x !== item); await UQ.del(rec.id); toast('Bukti tersimpan di Drive.', 'ok'); }
     else if (r.code === 'AUTH') { item.st = 'wait'; sessionExpired(); }
     else if (r.net) {
+      item.err = r.message || '';
       if (persisted) { item.st = 'wait'; setSync('offline'); if (!quiet) toast('Foto belum terkirim ke server. Foto tersimpan di perangkat ini dan dicoba kirim lagi otomatis.', 'warn', 5000); }
       else { S.upl = S.upl.filter(x => x !== item); toast('Gagal mengunggah dan penyimpanan lokal tidak tersedia. Ulangi saat ada sinyal.', 'err', 6000); }
     } else { S.upl = S.upl.filter(x => x !== item); await UQ.del(rec.id); toast((rec.name || 'Berkas') + ': ' + (r.message || 'Gagal mengunggah.'), 'err', 6000); }
-  } finally { item.sending = false; }
+  } catch (e) { item.st = 'wait'; item.err = (e && e.message) || 'Galat tak terduga'; }
+  finally { item.sending = false; }
   repaintEvidence(item.ctx); snapSoon(); syncIdle();
 }
 let _upBusy = false;
@@ -468,9 +472,14 @@ function evidenceOf(ctx) { return S.d.bukti.filter(b => (ctx.temuanId ? b.Temuan
 function evidenceHtml(ctx, canAdd) {
   const key = esc(JSON.stringify(ctx));
   const items = evidenceOf(ctx).map(b => '<div class="ev" data-bid="' + esc(b.ID) + '" onclick="previewBukti(this.dataset.bid)"><span class="ms">' + (/pdf/.test(b.Mime) ? 'picture_as_pdf' : 'image') + '</span><span class="truncate nm sm b">' + esc(b.Nama) + '</span></div>').join('');
-  const up = S.upl.filter(u => JSON.stringify(u.ctx) === JSON.stringify(ctx)).map(u => '<div class="ev up">' + (u.preview ? '<img src="' + u.preview + '" alt="" width="32" height="32" style="object-fit:cover;border-radius:4px">' : '<span class="ms">upload_file</span>') + '<span class="sm">' + (u.st === 'wait' ? 'Menunggu sinyal…' : 'Mengunggah…') + '</span></div>').join('');
+  const up = S.upl.filter(u => JSON.stringify(u.ctx) === JSON.stringify(ctx)).map(u => '<div class="ev up" data-uid="' + esc(u.id) + '" onclick="upItem(this.dataset.uid)">' + (u.preview ? '<img src="' + u.preview + '" alt="" width="32" height="32" style="object-fit:cover;border-radius:4px">' : '<span class="ms">upload_file</span>') + '<span class="sm">' + (u.st === 'wait' ? 'Belum terkirim — ketuk untuk kirim ulang/hapus' : 'Mengunggah…') + (u.st === 'wait' && u.err ? '<br><span class="muted" style="font-size:11px">' + esc(u.err) + '</span>' : '') + '</span></div>').join('');
   const add = canAdd ? '<button class="ev btn ghost sm" data-ctx="' + key + '" onclick="addEvidence(this,true)"><span class="ms sm">photo_camera</span>Foto</button><button class="ev btn ghost sm" data-ctx="' + key + '" onclick="addEvidence(this,false)"><span class="ms sm">attach_file</span>Berkas</button>' : '';
   return '<div class="evid" data-evctx="' + key + '">' + items + up + add + (!items && !up && !canAdd ? '<span class="muted sm">Belum ada bukti.</span>' : '') + '</div>';
+}
+async function upItem(id) {
+  const it = S.upl.find(x => x.id === id); if (!it || it.st === 'up') return;
+  if (await confirmBox('Foto belum terkirim', (it.err ? 'Penyebab terakhir: ' + esc(it.err) + '<br><br>' : '') + 'Kirim ulang sekarang?', 'Kirim ulang')) { flushUploads(); return; }
+  if (await confirmBox('Hapus foto dari antrean?', 'Foto ini tidak akan dikirim dan dihapus dari perangkat ini.', 'Hapus', 'orange')) { S.upl = S.upl.filter(x => x !== it); await UQ.del(id); repaintEvidence(it.ctx); syncIdle(); }
 }
 function addEvidence(btn, cam) { const ctx = JSON.parse(btn.dataset.ctx); pickFile({ camera: cam }, f => uploadEvidence(f, ctx)); }
 function repaintEvidence(ctx) {
