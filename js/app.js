@@ -420,14 +420,14 @@ async function uploadEvidence(file, ctx) {
   S.upl.push(item); repaintEvidence(ctx);
   await sendUpload(item, rec, persisted);
 }
-async function sendUpload(item, rec, persisted) {
+async function sendUpload(item, rec, persisted, quiet) {
   if (item.sending) return; item.sending = true; item.st = 'up'; repaintEvidence(item.ctx);
   try {
     const r = await api('upload', Object.assign({ id: rec.id, name: rec.name, mime: rec.mime, b64: rec.b64 }, rec.ctx));
     if (r.success) { if (!S.d.bukti.some(b => b.ID === r.data.ID)) S.d.bukti.push(r.data); S.upl = S.upl.filter(x => x !== item); await UQ.del(rec.id); toast('Bukti tersimpan di Drive.', 'ok'); }
     else if (r.code === 'AUTH') { item.st = 'wait'; sessionExpired(); }
     else if (r.net) {
-      if (persisted) { item.st = 'wait'; setSync('offline'); toast('Belum ada sinyal. Foto disimpan di HP dan dikirim otomatis nanti.', 'warn', 5000); }
+      if (persisted) { item.st = 'wait'; setSync('offline'); if (!quiet) toast('Foto belum terkirim ke server. Foto tersimpan di perangkat ini dan dicoba kirim lagi otomatis.', 'warn', 5000); }
       else { S.upl = S.upl.filter(x => x !== item); toast('Gagal mengunggah dan penyimpanan lokal tidak tersedia. Ulangi saat ada sinyal.', 'err', 6000); }
     } else { S.upl = S.upl.filter(x => x !== item); await UQ.del(rec.id); toast((rec.name || 'Berkas') + ': ' + (r.message || 'Gagal mengunggah.'), 'err', 6000); }
   } finally { item.sending = false; }
@@ -442,7 +442,7 @@ async function flushUploads() {
     for (const rec of recs) {
       let item = S.upl.find(x => x.id === rec.id);
       if (!item) { item = { id: rec.id, name: rec.name, preview: rec.preview, st: 'wait', ctx: rec.ctx }; S.upl.push(item); }
-      await sendUpload(item, rec, true); if (item.st === 'wait') break; // masih offline atau sesi habis
+      await sendUpload(item, rec, true, true); if (item.st === 'wait') break; // masih offline atau sesi habis
     }
   } finally { _upBusy = false; }
   syncIdle();
@@ -643,6 +643,12 @@ function rJadwal() {
   }
   el.innerHTML = h;
 }
+async function hapusAuditById(id) {
+  const a = S.d.audits.find(x => x.ID === id); if (!a || !isR('ADMIN')) return;
+  const n = window.prompt('HAPUS AUDIT BESERTA SEMUA DATANYA (temuan, PICA, penilaian, bukti). Cadangan dibuat otomatis, audit lain tidak tersentuh.\n\nKetik nama audit persis untuk melanjutkan:\n' + a.Nama); if (n === null) return;
+  const r = await api('hapusAudit', { id: a.ID, konfirmasi: n });
+  if (r.success) { if (S.audit === a.ID) { S.audit = null; ls.set('iasmkp_audit', ''); } closeModal(); await resync(true); renderAuditSel(); toast('Audit dihapus. Cadangan dibuat di Drive.', 'ok', 5000); } else toast(r.message, 'err', 6000);
+}
 function auditActions(x) {
   let b = '';
   if (canAudit() && x.Status !== 'Disetujui') b += '<button class="btn sm ghost" data-id="' + esc(x.ID) + '" onclick="auditModal(this.dataset.id)"><span class="ms sm">edit</span>Ubah</button>';
@@ -650,6 +656,7 @@ function auditActions(x) {
   if (x.Status === 'Berjalan' && isR('LEAD')) b += '<button class="btn sm orange" data-id="' + esc(x.ID) + '" onclick="setAuditStatus(this.dataset.id,\'Review\')"><span class="ms sm">lock</span>Kirim ke Review</button>';
   if (x.Status === 'Review' && isR('LEAD')) b += '<button class="btn sm warn" data-id="' + esc(x.ID) + '" onclick="setAuditStatus(this.dataset.id,\'Berjalan\')"><span class="ms sm">lock_open</span>Buka kunci</button>';
   if (x.Status === 'Review' && isR('PJO', 'ADMIN')) b += '<button class="btn sm ok" data-id="' + esc(x.ID) + '" onclick="setAuditStatus(this.dataset.id,\'Disetujui\')"><span class="ms sm">verified</span>Setujui</button>';
+  if (isR('ADMIN')) b += '<button class="btn sm ghost" style="color:var(--crit)" data-id="' + esc(x.ID) + '" onclick="hapusAuditById(this.dataset.id)"><span class="ms sm">delete</span>Hapus</button>';
   return b;
 }
 function pickAudit(id) { S.audit = id; ls.set('iasmkp_audit', id); renderAuditSel(); touch(); }
@@ -675,7 +682,7 @@ function auditModal(id) {
     '<div class="field"><label class="label">Lingkup lokasi / area</label><textarea class="textarea" id="auL" placeholder="Satu baris per area. Awali # untuk judul area, ## untuk sub-judul, tanpa tanda = butir. Contoh:&#10;# Area operasional luar tambang&#10;## Departemen HSE&#10;Workshop">' + esc(a.LingkupLokasi || '') + '</textarea></div>' +
     '<div class="field"><label class="label">Jumlah lokasi yang diaudit</label><input class="input" id="auJL" type="number" inputmode="numeric" min="0" value="' + esc(a.JumlahLokasi || '') + '"><div class="hint">Dipakai aturan Mayor: temuan minor pada satu sub-elemen di &gt; 30% lokasi.</div></div></div>' +
     '<div class="m-foot">' + (id && isR('ADMIN') ? '<button class="btn ghost" id="auDel" style="margin-right:auto;color:var(--crit)"><span class="ms sm">delete</span>Hapus audit ini</button>' : '') + '<button class="btn ghost" onclick="closeModal()">Batal</button><button class="btn primary" id="auGo">Simpan</button></div>', { wide: true });
-  if ($('#auDel', ov)) $('#auDel', ov).onclick = async () => { const n = window.prompt('HAPUS AUDIT BESERTA SEMUA DATANYA (temuan, PICA, penilaian, bukti). Cadangan dibuat otomatis, audit lain tidak tersentuh.\n\nKetik nama audit persis untuk melanjutkan:\n' + a.Nama); if (n === null) return; const r = await api('hapusAudit', { id: a.ID, konfirmasi: n }); if (r.success) { S.audit = null; ls.set('iasmkp_audit', ''); closeModal(); await resync(true); renderAuditSel(); toast('Audit dihapus. Cadangan dibuat di Drive.', 'ok', 5000); } else toast(r.message, 'err', 6000); };
+  if ($('#auDel', ov)) $('#auDel', ov).onclick = () => hapusAuditById(a.ID);
   $('#auGo', ov).onclick = () => {
     const nama = $('#auN').value.trim(); if (!nama) { toast('Nama audit wajib diisi.', 'err'); return; }
     const rec = { ID: a.ID || uid(), Nama: nama, Tahun: Number($('#auY').value) || new Date().getFullYear(), Jenis: $('#auJ').value, TglMulai: $('#auM').value, TglSelesai: $('#auS').value, TglPembukaan: $('#auB').value, TglPenutupan: $('#auT').value, LingkupLokasi: $('#auL').value.trim(), JumlahLokasi: Number($('#auJL').value) || 0 };
@@ -910,6 +917,14 @@ function openTemuan(id) {
     (!locked && ((isR('LEAD')) || (isR('AUDITOR') && t.Status === 'Draft' && lc(t.Oleh) === lc(S.user.email))) ? '<div class="flex" style="justify-content:flex-end"><button class="btn sm ghost" style="color:var(--crit)" data-id="' + esc(id) + '" onclick="delTemuan(this.dataset.id)"><span class="ms sm">delete</span>Hapus temuan</button></div>' : '') + '</div>';
   openModal(html, { drawer: true }); S.drawer = id; akarBackfill(t);
 }
+/** Akar masalah dari auditor (5-Why), ditampilkan agar PIC menyusun rencana yang menyasar penyebabnya. */
+function akarBlok(t) {
+  const w = [1, 2, 3, 4, 5].map(i => String(t['Why' + i] || '').trim()).filter(Boolean), a = String(t.AkarMasalah || '').trim();
+  if (!a && !w.length) return '<div class="banner warn" style="margin-top:12px"><span class="ms">help</span><div class="sm">Auditor belum mengisi analisis akar masalah. Susun rencana berdasarkan uraian temuan, lalu sesuaikan bila akar masalah sudah dicantumkan.</div></div>';
+  return '<div class="card flat" style="margin-top:12px;border-left:4px solid var(--orange)"><div class="b sm">Akar masalah (hasil analisis auditor)</div>' + (a ? '<div class="sm mt8" style="margin-top:6px">' + esc(a) + '</div>' : '') +
+    (w.length ? '<details style="margin-top:8px"><summary class="sm muted" style="cursor:pointer">Lihat rantai "Mengapa"</summary><ol class="sm" style="margin:6px 0 0 18px;padding:0">' + w.map(x => '<li>' + esc(x) + '</li>').join('') + '</ol></details>' : '') +
+    '<div class="muted sm" style="margin-top:8px">Tindakan pencegahan berulang sebaiknya menyasar akar masalah ini.</div></div>';
+}
 function akarBackfill(t) { if (!t || !canEditT(t) || String(t.AkarMasalah || '').trim()) return; const v = akarAuto(t); if (!v) return; t.AkarMasalah = v; save('Temuan', { ID: t.ID, AuditID: t.AuditID, AkarMasalah: v }); }
 function refreshDrawer() { if (S.drawer && $('#ovl')) { const sc = $('#ovl .drawer').scrollTop; openTemuan(S.drawer); const d = $('#ovl .drawer'); if (d) d.scrollTop = sc; } }
 function whyTambah(btn) { const h = document.querySelector('[data-extra][hidden]'); if (h) { h.hidden = false; const i = h.querySelector('input'); if (i) i.focus(); } if (!document.querySelector('[data-extra][hidden]')) btn.hidden = true; }
@@ -1015,7 +1030,7 @@ function picaModal(tid, pid) {
   const info = aprv
     ? '<div class="banner info"><span class="ms">task_alt</span><div><b>Tahap 2 — Pelaksanaan</b><span class="sm">' + (kunci ? 'Rencana di bawah sudah tercantum dalam laporan yang disetujui dan tidak dapat diubah. ' : 'Rencana belum lengkap — lengkapi dahulu. ') + 'Unggah bukti pelaksanaan, lalu ajukan ke auditor untuk diverifikasi.</span></div></div>'
     : '<div class="banner info"><span class="ms">edit_note</span><div><b>Tahap 1 — Rencana tindak lanjut</b><span class="sm">Rencana ini akan dicantumkan dalam laporan audit. Bukti pelaksanaan diunggah nanti, setelah laporan disetujui.</span></div></div>';
-  const ov = openModal(mHead((aprv ? 'Pelaksanaan tindak lanjut — ' : 'Rencana tindak lanjut — ') + t.Nomor, 'assignment_turned_in') + '<div class="m-body"><div class="card flat" style="background:var(--soft)"><div class="b sm">' + esc(t.Kode) + ' · ' + esc(kriNama(t.Kode)) + '</div><div class="sm mt8" style="margin-top:6px">' + esc(t.Uraian) + '</div></div>' + info +
+  const ov = openModal(mHead((aprv ? 'Pelaksanaan tindak lanjut — ' : 'Rencana tindak lanjut — ') + t.Nomor, 'assignment_turned_in') + '<div class="m-body"><div class="card flat" style="background:var(--soft)"><div class="b sm">' + esc(t.Kode) + ' · ' + esc(kriNama(t.Kode)) + '</div><div class="sm mt8" style="margin-top:6px">' + esc(t.Uraian) + '</div></div>' + akarBlok(t) + info +
     (p.Status === 'Ditolak' && p.CatatanVerif ? '<div class="banner crit"><span class="ms">replay</span><div><b>Ditolak auditor</b><span class="sm">' + esc(p.CatatanVerif) + '</span></div></div>' : '') +
     '<div class="field"><label class="label">Tindakan koreksi langsung (correction) *</label><textarea class="textarea" id="pcK"' + dis + ' placeholder="Tindakan segera memperbaiki kondisi di lokasi…">' + esc(p.Koreksi || '') + '</textarea></div>' +
     '<div class="field"><label class="label">Tindakan pencegahan berulang (corrective) *</label><textarea class="textarea" id="pcC"' + dis + ' placeholder="Sistem/prosedur agar tidak terulang…">' + esc(p.Korektif || '') + '</textarea></div>' +
