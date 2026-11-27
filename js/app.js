@@ -214,9 +214,10 @@ async function flush() {
 }
 function setSync(st) {
   S.sync = st; const el = $('#sync'); if (!el) return; el.className = 'sync ' + st;
-  $('#syncT').textContent = st === 'ok' ? 'Tersimpan' : st === 'saving' ? 'Menyimpan…' : st === 'pending' ? 'Perubahan lokal…' : 'Offline · ' + Q.items.length + ' antrean';
+  const nf = S.upl.filter(u => u.st === 'wait').length; $('#syncT').textContent = st === 'ok' ? (window.innerWidth > 700 ? 'Tersimpan otomatis' : 'Tersimpan') : st === 'saving' ? 'Menyimpan…' : st === 'pending' ? 'Perubahan lokal…' : 'Offline · ' + Q.items.length + ' antrean' + (nf ? ' + ' + nf + ' foto' : '');
 }
-window.addEventListener('online', () => { if (Q.items.length) flush(); });
+window.addEventListener('online', () => { if (Q.items.length) flush(); flushUploads(); });
+window.addEventListener('offline', () => { toast('Tidak ada sinyal. Perubahan dan foto disimpan di HP, dikirim otomatis saat sinyal kembali.', 'warn', 6000); setSync('offline'); });
 window.addEventListener('beforeunload', () => { persistQ(); snapshot(); });
 
 /* ----------------------- Bootstrap & sinkronisasi ----------------------- */
@@ -319,7 +320,7 @@ async function loadData(fresh) {
   if (Q.items.length) flush(); pollVer(); return true;
 }
 async function logout() {
-  if (Q.items.length) { const ok = await confirmBox('Perubahan belum terkirim', 'Masih ada ' + Q.items.length + ' perubahan menunggu sinkron. Keluar sekarang akan menyimpannya di perangkat ini sampai Anda masuk lagi.', 'Keluar', 'orange'); if (!ok) return; }
+  if (pendTotal()) { const ok = await confirmBox('Perubahan belum terkirim', 'Masih ada ' + Q.items.length + ' perubahan dan ' + waitFoto() + ' foto menunggu sinkron. Keluar sekarang menyimpannya di perangkat ini sampai Anda masuk lagi dengan akun yang sama; jangan hapus data browser.', 'Keluar', 'orange'); if (!ok) return; }
   await api('logout'); clearTimeout(_pollT); S.token = null; TOK.del(); ss.del('iasmkp_pg'); ls.del('iasmkp_snap'); S.d = null; showLogin();
 }
 function pwModal(force) {
@@ -352,22 +353,77 @@ function pickFile(opts, cb) {
   inp.onchange = async () => { const f = inp.files && inp.files[0]; if (f) cb(f); };
   inp.click();
 }
+/* Antrean foto/berkas offline: disimpan di IndexedDB HP, dikirim otomatis saat sinyal ada. Server idempoten menurut ID. */
+const UQ = {
+  db: null,
+  open() { return new Promise(res => { if (this.db) return res(this.db); try { const rq = indexedDB.open('iasmkp-up', 1); rq.onupgradeneeded = () => rq.result.createObjectStore('u', { keyPath: 'id' }); rq.onsuccess = () => { this.db = rq.result; res(this.db); }; rq.onerror = () => res(null); } catch (e) { res(null); } }); },
+  async tx(mode, fn) { const db = await this.open(); if (!db) return null; return new Promise(res => { try { const t = db.transaction('u', mode), rq = fn(t.objectStore('u')); t.oncomplete = () => res(rq && rq.result !== undefined ? rq.result : true); t.onerror = t.onabort = () => res(null); } catch (e) { res(null); } }); },
+  put(rec) { return this.tx('readwrite', s => s.put(rec)); },
+  del(id) { return this.tx('readwrite', s => s.delete(id)); },
+  all() { return this.tx('readonly', s => s.getAll()).then(r => Array.isArray(r) ? r : []); }
+};
+const waitFoto = () => S.upl.filter(u => u.st === 'wait').length;
+const pendTotal = () => Q.items.length + waitFoto();
+function syncIdle() { if (S.sync === 'offline' && !pendTotal() && navigator.onLine !== false) setSync('ok'); else if (S.sync === 'offline') setSync('offline'); }
 async function uploadEvidence(file, ctx) {
   if (file.size > 20 * 1024 * 1024) { toast('Berkas terlalu besar (maks 20 MB sebelum kompres).', 'err'); return; }
   const c = await compressImage(file); if (!c) { toast('Berkas tidak dapat dibaca.', 'err'); return; }
   if (c.b64.length > 7400000) { toast('Berkas masih terlalu besar setelah kompres (maks ± 5 MB).', 'err'); return; }
-  const item = { id: uid(), name: c.name, preview: c.preview, st: 'up', ctx };
+  const rec = { id: uid(), name: c.name, mime: c.mime, b64: c.b64, ctx, preview: c.preview, ts: Date.now(), user: lc((S.user || {}).email) };
+  const persisted = !!(await UQ.put(rec));
+  const item = { id: rec.id, name: c.name, preview: c.preview, st: 'up', ctx };
   S.upl.push(item); repaintEvidence(ctx);
-  const r = await api('upload', Object.assign({ id: item.id, name: c.name, mime: c.mime, b64: c.b64 }, ctx));
-  if (r.success) { S.d.bukti.push(r.data); item.st = 'ok'; S.upl = S.upl.filter(x => x !== item); toast('Bukti tersimpan di Drive.', 'ok'); }
-  else { item.st = 'err'; S.upl = S.upl.filter(x => x !== item); toast(r.message || 'Gagal mengunggah.', 'err', 5000); }
-  repaintEvidence(ctx); snapSoon();
+  await sendUpload(item, rec, persisted);
+}
+async function sendUpload(item, rec, persisted) {
+  if (item.sending) return; item.sending = true; item.st = 'up'; repaintEvidence(item.ctx);
+  try {
+    const r = await api('upload', Object.assign({ id: rec.id, name: rec.name, mime: rec.mime, b64: rec.b64 }, rec.ctx));
+    if (r.success) { if (!S.d.bukti.some(b => b.ID === r.data.ID)) S.d.bukti.push(r.data); S.upl = S.upl.filter(x => x !== item); await UQ.del(rec.id); toast('Bukti tersimpan di Drive.', 'ok'); }
+    else if (r.code === 'AUTH') { item.st = 'wait'; sessionExpired(); }
+    else if (r.net) {
+      if (persisted) { item.st = 'wait'; setSync('offline'); toast('Belum ada sinyal. Foto disimpan di HP dan dikirim otomatis nanti.', 'warn', 5000); }
+      else { S.upl = S.upl.filter(x => x !== item); toast('Gagal mengunggah dan penyimpanan lokal tidak tersedia. Ulangi saat ada sinyal.', 'err', 6000); }
+    } else { S.upl = S.upl.filter(x => x !== item); await UQ.del(rec.id); toast((rec.name || 'Berkas') + ': ' + (r.message || 'Gagal mengunggah.'), 'err', 6000); }
+  } finally { item.sending = false; }
+  repaintEvidence(item.ctx); snapSoon(); syncIdle();
+}
+let _upBusy = false;
+async function flushUploads() {
+  if (_upBusy || !S.token || !S.user || navigator.onLine === false) return; _upBusy = true;
+  try {
+    if (Q.items.length) { await flush(); if (Q.items.length) return; } // data teks (temuan/PICA) harus tiba lebih dulu
+    const me = lc(S.user.email), recs = (await UQ.all()).filter(r => r.user === me).sort((x, y) => x.ts - y.ts);
+    for (const rec of recs) {
+      let item = S.upl.find(x => x.id === rec.id);
+      if (!item) { item = { id: rec.id, name: rec.name, preview: rec.preview, st: 'wait', ctx: rec.ctx }; S.upl.push(item); }
+      await sendUpload(item, rec, true); if (item.st === 'wait') break; // masih offline atau sesi habis
+    }
+  } finally { _upBusy = false; }
+  syncIdle();
+}
+setInterval(() => { if (S.token && navigator.onLine !== false && document.visibilityState === 'visible') flushUploads(); }, 20000);
+async function loadPendingUploads() {
+  const me = lc((S.user || {}).email || ((ls.get('iasmkp_snap') || {}).user || {}).email); if (!me) return;
+  (await UQ.all()).filter(r => r.user === me).forEach(rec => { if (!S.upl.some(x => x.id === rec.id)) S.upl.push({ id: rec.id, name: rec.name, preview: rec.preview, st: 'wait', ctx: rec.ctx }); });
+  if (waitFoto()) { setSync(navigator.onLine === false ? 'offline' : S.sync); flushUploads(); }
+}
+/** Tombol "Siapkan offline": muat ulang data penuh, pastikan tersimpan di HP, minta penyimpanan permanen. */
+async function prepOffline() {
+  if (navigator.onLine === false) { toast('Perlu sinyal untuk menyiapkan data offline.', 'warn'); return; }
+  toast('Menyiapkan data untuk offline…', 'info');
+  await flush(); await flushUploads(); await resync(true); snapshot();
+  let persist = null; try { if (navigator.storage && navigator.storage.persist) persist = await navigator.storage.persist(); } catch (e) { }
+  let sw = false; try { sw = !!(navigator.serviceWorker && await navigator.serviceWorker.getRegistration()); } catch (e) { }
+  const a = curAudit(), nT = a ? S.d.temuan.filter(t => t.AuditID === a.ID).length : 0, nB = a ? Object.keys(S.nilai[a.ID] || {}).length : 0;
+  const ok = !!S.d && sw;
+  toast((ok ? 'Siap offline' : 'Belum sepenuhnya siap') + (a ? ' · ' + a.Nama + ': ' + nB + ' butir dinilai, ' + nT + ' temuan' : '') + '. Aplikasi tersimpan: ' + (sw ? 'ya' : 'belum (buka ulang dengan sinyal)') + ' · Penyimpanan permanen: ' + (persist === null ? 'tidak didukung' : persist ? 'ya' : 'belum diizinkan browser') + '. Jangan logout sebelum label menunjukkan Tersimpan.', ok ? 'ok' : 'warn', 9000);
 }
 function evidenceOf(ctx) { return S.d.bukti.filter(b => (ctx.temuanId ? b.TemuanID === ctx.temuanId : (b.AuditID === ctx.auditId && b.Kode === ctx.kode && !b.TemuanID)) && (!ctx.tindakId || b.TindakID === ctx.tindakId)); }
 function evidenceHtml(ctx, canAdd) {
   const key = esc(JSON.stringify(ctx));
   const items = evidenceOf(ctx).map(b => '<div class="ev" data-bid="' + esc(b.ID) + '" onclick="previewBukti(this.dataset.bid)"><span class="ms">' + (/pdf/.test(b.Mime) ? 'picture_as_pdf' : 'image') + '</span><span class="truncate nm sm b">' + esc(b.Nama) + '</span></div>').join('');
-  const up = S.upl.filter(u => JSON.stringify(u.ctx) === JSON.stringify(ctx)).map(u => '<div class="ev up">' + (u.preview ? '<img src="' + u.preview + '" alt="" width="32" height="32" style="object-fit:cover;border-radius:4px">' : '<span class="ms">upload_file</span>') + '<span class="sm">Mengunggah…</span></div>').join('');
+  const up = S.upl.filter(u => JSON.stringify(u.ctx) === JSON.stringify(ctx)).map(u => '<div class="ev up">' + (u.preview ? '<img src="' + u.preview + '" alt="" width="32" height="32" style="object-fit:cover;border-radius:4px">' : '<span class="ms">upload_file</span>') + '<span class="sm">' + (u.st === 'wait' ? 'Menunggu sinyal…' : 'Mengunggah…') + '</span></div>').join('');
   const add = canAdd ? '<button class="ev btn ghost sm" data-ctx="' + key + '" onclick="addEvidence(this,true)"><span class="ms sm">photo_camera</span>Foto</button><button class="ev btn ghost sm" data-ctx="' + key + '" onclick="addEvidence(this,false)"><span class="ms sm">attach_file</span>Berkas</button>' : '';
   return '<div class="evid" data-evctx="' + key + '">' + items + up + add + (!items && !up && !canAdd ? '<span class="muted sm">Belum ada bukti.</span>' : '') + '</div>';
 }
@@ -1174,7 +1230,7 @@ function wire() {
   const start = () => {
     wire(); setTheme(th); initPwa(); warmUp();
     if (publicRoute()) return;
-    S.token = TOK.get(); Q.items = ls.get('iasmkp_q') || [];
+    S.token = TOK.get(); Q.items = ls.get('iasmkp_q') || []; loadPendingUploads();
     const snap = ls.get('iasmkp_snap');
     if (S.token && snap && snap.d && snap.user) {      // render instan dari cache lokal, lalu segarkan di latar belakang
       S.d = snap.d; S.user = snap.user; S.nilai = snap.nilai || {}; S.audit = snap.audit; S.dv = snap.dv || null; if (!S.d.dokumen) S.d.dokumen = []; Q.items.forEach(it => { try { applyLocal(it.t, it.r, it.del); } catch (e) { } });
@@ -1191,6 +1247,7 @@ function wire() {
 function warmUp() { if (GAS_OK()) { try { fetch(GAS_URL + '?action=ping', { cache: 'no-store' }).catch(() => { }); } catch (e) { } } }
 let _installEv = null;
 function initPwa() {
+  const bo = $('#btnOffline'); if (bo) bo.onclick = prepOffline;
   if ('serviceWorker' in navigator && location.protocol !== 'file:') window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => { }));
   const btn = $('#btnInstall'), standalone = (window.matchMedia && matchMedia('(display-mode: standalone)').matches) || navigator.standalone;
   window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); _installEv = e; if (btn) btn.hidden = false; });
