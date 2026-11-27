@@ -313,7 +313,8 @@ async function fetchBrand() {
 }
 function brandFromParams() {
   if (!S.d || !S.d.params || !S.d.params.NAMA_PERUSAHAAN) return;
-  const b = { nama: P('NAMA_HEADER') || P('NAMA_PERUSAHAAN'), teks: P('TEKS_HEADER'), tag: P('TAG_HEADER'), sub: P('SUB_LOGIN'), logoId: P('LOGO_ID') };
+  const baru = Object.prototype.hasOwnProperty.call(S.d.params, 'TEKS_HEADER');  // server lama belum punya parameter ini → pakai bawaan
+  const b = { nama: P('NAMA_HEADER') || P('NAMA_PERUSAHAAN'), teks: baru ? P('TEKS_HEADER') : 'SMKP System', tag: baru ? P('TAG_HEADER') : '185/2019', sub: baru ? P('SUB_LOGIN') : 'Jasa Pertambangan (IUJP)', logoId: P('LOGO_ID') };
   const ganti = (BR.logoId || '') !== b.logoId; if (ganti) b.logo = '';
   applyBrand(b); if (ganti) fetchBrand(); else ls.set('iasmkp_brand', BR);
 }
