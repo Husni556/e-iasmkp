@@ -397,7 +397,12 @@ function compressImage(file) {
 }
 function pickFile(opts, cb) {
   const inp = $('#fileIn'); inp.value = ''; inp.accept = 'image/*,application/pdf'; if (opts.camera) inp.setAttribute('capture', 'environment'); else inp.removeAttribute('capture');
-  inp.onchange = async () => { const f = inp.files && inp.files[0]; if (f) cb(f); };
+  inp.multiple = true;  // boleh pilih banyak berkas sekaligus (Ctrl/Shift atau Ctrl+A di jendela pilih berkas)
+  inp.onchange = async () => {
+    const fs = Array.from(inp.files || []).slice(0, 30); if ((inp.files || []).length > 30) toast('Maksimal 30 berkas sekali pilih; sisanya diabaikan.', 'warn');
+    if (fs.length > 1) toast(fs.length + ' berkas dipilih, sedang diproses…', 'info', 2500);
+    for (const f of fs) { try { await cb(f); } catch (e) { toast('Berkas ' + f.name + ' gagal diproses.', 'err'); } }  // satu per satu agar tidak berebut
+  };
   inp.click();
 }
 /* Antrean foto/berkas offline: disimpan di IndexedDB HP, dikirim otomatis saat sinyal ada. Server idempoten menurut ID. */
