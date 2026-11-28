@@ -177,6 +177,11 @@ function canScore(aid, kode) {
   return false;
 }
 const canAudit = () => isR('ADMIN', 'LEAD');
+/** Boleh MENGELOLA audit (ubah, tim, status): Admin, pembuat, atau Lead Auditor pada Tim & Penugasan audit itu. */
+function canManage(a) {
+  if (!a || !S.user) return false; if (isR('ADMIN')) return true; if (!isR('LEAD')) return false;
+  const em = lc(S.user.email); return lc(a.DibuatOleh) === em || (S.d.penugasan || []).some(p => p.AuditID === a.ID && lc(p.Email) === em && p.Peran === 'Lead Auditor');
+}
 const canTemuan = () => isR('LEAD', 'AUDITOR');
 
 /* -------------------- Penyimpanan lokal (snapshot + antrean) -------------------- */
@@ -666,7 +671,7 @@ const PERAN = ['Lead Auditor', 'Auditor', 'Pemandu', 'Pengamat', 'Tenaga Ahli'];
 function rJadwal() {
   const el = $('#page-jadwal'), a = curAudit();
   let h = '<div class="ph"><div><div class="crumb">SMKP Minerba / <b>Jadwal</b></div><h1>Jadwal & Penugasan</h1><p>Periode audit, tim auditor, dan pembagian elemen.</p></div><div class="actions">' + (canAudit() ? '<button class="btn primary" onclick="auditModal()"><span class="ms">add_circle</span>Audit baru</button>' : '') + '</div></div>';
-  if (!S.d.audits.length) { el.innerHTML = h + emptyBox('event', 'Belum ada audit', canAudit() ? 'Klik “Audit baru” untuk membuat periode audit.' : 'Menunggu Admin/Lead Auditor membuat audit.'); return; }
+  if (!S.d.audits.length) { el.innerHTML = h + emptyBox('event', 'Belum ada audit', canAudit() ? 'Klik “Audit baru” untuk membuat periode audit.' : 'Menunggu Admin/Lead Auditor membuat audit, atau menugaskan Anda pada audit.') + sampahCard(); return; }
   h += '<div class="grid g2">' + S.d.audits.slice().sort((x, y) => String(y.TglMulai || y.Tahun).localeCompare(String(x.TglMulai || x.Tahun))).map(x => {
     const sk = hitungSkor(x.ID), on = x.ID === S.audit;
     return '<div class="card" style="' + (on ? 'border-color:var(--blue);box-shadow:0 0 0 1px var(--blue)' : '') + '"><div class="flex between wrap"><div class="b" style="font-size:15px">' + esc(x.Nama) + '</div>' + statusChip(x.Status) + '</div><div class="muted sm mt8">' + esc(x.Jenis || 'Internal') + ' · Tahun ' + esc(x.Tahun) + ' · ' + fmtD(x.TglMulai) + ' – ' + fmtD(x.TglSelesai) + '</div><div class="muted sm">' + esc(x.LingkupLokasi || '-') + ' · ' + (x.JumlahLokasi || 0) + ' lokasi</div>' +
@@ -675,24 +680,38 @@ function rJadwal() {
   }).join('') + '</div>';
   if (a) {
     const pen = S.d.penugasan.filter(p => p.AuditID === a.ID);
-    h += '<div class="card mt16" style="margin-top:16px"><div class="card-h"><h3 class="flex"><span class="ms" style="color:var(--blue)">groups</span>Tim & Penugasan — ' + esc(a.Nama) + '</h3>' + (canAudit() && a.Status !== 'Disetujui' ? '<button class="btn sm primary" onclick="penModal()"><span class="ms sm">person_add</span>Tambah</button>' : '') + '</div>' +
-      (pen.length ? '<div class="table-wrap"><table class="t"><thead><tr><th>Nama</th><th>Peran</th><th>Elemen</th><th>Lokasi / Area</th><th></th></tr></thead><tbody>' + pen.map(p => '<tr><td><div class="b">' + esc(p.Nama || p.Email) + '</div><div class="muted sm">' + esc(p.Email) + '</div></td><td>' + esc(p.Peran) + '</td><td>' + (String(p.Elemen || '*') === '*' ? 'Semua' : esc(p.Elemen)) + '</td><td>' + esc(p.Lokasi || '-') + '</td><td style="text-align:right;white-space:nowrap">' + (canAudit() && a.Status !== 'Disetujui' ? '<button class="iconbtn" data-id="' + esc(p.ID) + '" onclick="penModal(this.dataset.id)" aria-label="Ubah"><span class="ms">edit</span></button><button class="iconbtn" data-id="' + esc(p.ID) + '" onclick="delPen(this.dataset.id)" aria-label="Hapus"><span class="ms">delete</span></button>' : '') + '</td></tr>').join('') + '</tbody></table></div>' : '<div class="empty" style="padding:16px">Belum ada penugasan. Tambahkan Lead Auditor dan auditor beserta elemen yang dipegang.</div>') +
+    h += '<div class="card mt16" style="margin-top:16px"><div class="card-h"><h3 class="flex"><span class="ms" style="color:var(--blue)">groups</span>Tim & Penugasan — ' + esc(a.Nama) + '</h3>' + (canManage(a) && a.Status !== 'Disetujui' ? '<button class="btn sm primary" onclick="penModal()"><span class="ms sm">person_add</span>Tambah</button>' : '') + '</div>' +
+      (pen.length ? '<div class="table-wrap"><table class="t"><thead><tr><th>Nama</th><th>Peran</th><th>Elemen</th><th>Lokasi / Area</th><th></th></tr></thead><tbody>' + pen.map(p => '<tr><td><div class="b">' + esc(p.Nama || p.Email) + '</div><div class="muted sm">' + esc(p.Email) + '</div></td><td>' + esc(p.Peran) + '</td><td>' + (String(p.Elemen || '*') === '*' ? 'Semua' : esc(p.Elemen)) + '</td><td>' + esc(p.Lokasi || '-') + '</td><td style="text-align:right;white-space:nowrap">' + (canManage(a) && a.Status !== 'Disetujui' ? '<button class="iconbtn" data-id="' + esc(p.ID) + '" onclick="penModal(this.dataset.id)" aria-label="Ubah"><span class="ms">edit</span></button><button class="iconbtn" data-id="' + esc(p.ID) + '" onclick="delPen(this.dataset.id)" aria-label="Hapus"><span class="ms">delete</span></button>' : '') + '</td></tr>').join('') + '</tbody></table></div>' : '<div class="empty" style="padding:16px">Belum ada penugasan. Tambahkan Lead Auditor dan auditor beserta elemen yang dipegang.</div>') +
       '<div class="hint">Auditor hanya dapat menilai elemen yang ditugaskan kepadanya. Peran mengikuti Kepdirjen: Lead Auditor, Auditor, Pemandu, Pengamat, Tenaga Ahli.</div></div>';
   }
-  el.innerHTML = h;
+  el.innerHTML = h + sampahCard();
 }
 async function hapusAuditById(id) {
   const a = S.d.audits.find(x => x.ID === id); if (!a || !isR('ADMIN')) return;
-  const n = window.prompt('HAPUS AUDIT BESERTA SEMUA DATANYA (temuan, PICA, penilaian, bukti). Cadangan dibuat otomatis, audit lain tidak tersentuh.\n\nKetik nama audit persis untuk melanjutkan:\n' + a.Nama); if (n === null) return;
+  const n = window.prompt('PINDAHKAN AUDIT KE TEMPAT SAMPAH\n\nAudit tidak terlihat oleh siapa pun selain Admin, tetapi datanya utuh dan bisa dipulihkan dari "Tempat sampah" di halaman ini.\n\nKetik nama audit persis untuk melanjutkan:\n' + a.Nama); if (n === null) return;
   const r = await api('hapusAudit', { id: a.ID, konfirmasi: n });
-  if (r.success) { if (S.audit === a.ID) { S.audit = null; ls.set('iasmkp_audit', ''); } closeModal(); await resync(true); renderAuditSel(); toast('Audit dihapus. Cadangan dibuat di Drive.', 'ok', 5000); } else toast(r.message, 'err', 6000);
+  if (r.success) { if (S.audit === a.ID) { S.audit = null; ls.set('iasmkp_audit', ''); } closeModal(); await resync(true); renderAuditSel(); toast('Audit dipindah ke tempat sampah. Bisa dipulihkan.', 'ok', 5000); } else toast(r.message, 'err', 6000);
+}
+async function pulihkanAuditById(id) {
+  const r = await api('pulihkanAudit', { id }); if (r.success) { await resync(true); renderAuditSel(); toast(r.message, 'ok'); } else toast(r.message, 'err');
+}
+async function hapusPermanenById(id) {
+  const a = (S.d.sampah || []).find(x => x.ID === id); if (!a) return;
+  const n = window.prompt('BUANG PERMANEN — tidak bisa dibatalkan dari aplikasi (cadangan spreadsheet dibuat di Drive).\n\nKetik nama audit persis untuk melanjutkan:\n' + a.Nama); if (n === null) return;
+  const r = await api('hapusPermanen', { id: a.ID, konfirmasi: n });
+  if (r.success) { await resync(true); renderAuditSel(); toast(r.message, 'ok', 6000); } else toast(r.message, 'err', 6000);
+}
+function sampahCard() {
+  const L = S.d.sampah || []; if (!isR('ADMIN') || !L.length) return '';
+  return '<div class="card mt16" style="margin-top:16px"><div class="card-h"><h3 class="flex"><span class="ms" style="color:var(--muted)">delete</span>Tempat sampah (' + L.length + ')</h3></div><div class="table-wrap"><table class="t"><thead><tr><th>Audit</th><th>Dihapus</th><th></th></tr></thead><tbody>' +
+    L.map(x => '<tr><td><div class="b">' + esc(x.Nama) + '</div><div class="muted sm">Tahun ' + esc(x.Tahun) + ' · ' + esc(x.Status) + '</div></td><td class="sm">' + fmtD(String(x.DihapusPada).slice(0, 10)) + '<div class="muted sm">oleh ' + esc(x.DihapusOleh) + '</div></td><td style="text-align:right;white-space:nowrap"><button class="btn sm primary" data-id="' + esc(x.ID) + '" onclick="pulihkanAuditById(this.dataset.id)"><span class="ms sm">restore_from_trash</span>Pulihkan</button> <button class="btn sm ghost" style="color:var(--crit)" data-id="' + esc(x.ID) + '" onclick="hapusPermanenById(this.dataset.id)"><span class="ms sm">delete_forever</span>Buang permanen</button></td></tr>').join('') + '</tbody></table></div></div>';
 }
 function auditActions(x) {
   let b = '';
-  if (canAudit() && x.Status !== 'Disetujui') b += '<button class="btn sm ghost" data-id="' + esc(x.ID) + '" onclick="auditModal(this.dataset.id)"><span class="ms sm">edit</span>Ubah</button>';
-  if (x.Status === 'Draft' && canAudit()) b += '<button class="btn sm ok" data-id="' + esc(x.ID) + '" onclick="setAuditStatus(this.dataset.id,\'Berjalan\')"><span class="ms sm">play_arrow</span>Mulai</button>';
-  if (x.Status === 'Berjalan' && isR('LEAD')) b += '<button class="btn sm orange" data-id="' + esc(x.ID) + '" onclick="setAuditStatus(this.dataset.id,\'Review\')"><span class="ms sm">lock</span>Kirim ke Review</button>';
-  if (x.Status === 'Review' && isR('LEAD')) b += '<button class="btn sm warn" data-id="' + esc(x.ID) + '" onclick="setAuditStatus(this.dataset.id,\'Berjalan\')"><span class="ms sm">lock_open</span>Buka kunci</button>';
+  if (canManage(x) && x.Status !== 'Disetujui') b += '<button class="btn sm ghost" data-id="' + esc(x.ID) + '" onclick="auditModal(this.dataset.id)"><span class="ms sm">edit</span>Ubah</button>';
+  if (x.Status === 'Draft' && canManage(x)) b += '<button class="btn sm ok" data-id="' + esc(x.ID) + '" onclick="setAuditStatus(this.dataset.id,\'Berjalan\')"><span class="ms sm">play_arrow</span>Mulai</button>';
+  if (x.Status === 'Berjalan' && isR('LEAD') && canManage(x)) b += '<button class="btn sm orange" data-id="' + esc(x.ID) + '" onclick="setAuditStatus(this.dataset.id,\'Review\')"><span class="ms sm">lock</span>Kirim ke Review</button>';
+  if (x.Status === 'Review' && isR('LEAD') && canManage(x)) b += '<button class="btn sm warn" data-id="' + esc(x.ID) + '" onclick="setAuditStatus(this.dataset.id,\'Berjalan\')"><span class="ms sm">lock_open</span>Buka kunci</button>';
   if (x.Status === 'Review' && isR('PJO', 'ADMIN')) b += '<button class="btn sm ok" data-id="' + esc(x.ID) + '" onclick="setAuditStatus(this.dataset.id,\'Disetujui\')"><span class="ms sm">verified</span>Setujui</button>';
   if (isR('ADMIN')) b += '<button class="btn sm ghost" style="color:var(--crit)" data-id="' + esc(x.ID) + '" onclick="hapusAuditById(this.dataset.id)"><span class="ms sm">delete</span>Hapus</button>';
   return b;
@@ -721,8 +740,9 @@ function auditModal(id) {
     '<div class="field"><label class="label">Jumlah lokasi yang diaudit</label><input class="input" id="auJL" type="number" inputmode="numeric" min="0" value="' + esc(a.JumlahLokasi || '') + '"><div class="hint">Dipakai aturan Mayor: temuan minor pada satu sub-elemen di &gt; 30% lokasi.</div></div></div>' +
     '<div class="m-foot">' + (id && isR('ADMIN') ? '<button class="btn ghost" id="auDel" style="margin-right:auto;color:var(--crit)"><span class="ms sm">delete</span>Hapus audit ini</button>' : '') + '<button class="btn ghost" onclick="closeModal()">Batal</button><button class="btn primary" id="auGo">Simpan</button></div>', { wide: true });
   if ($('#auDel', ov)) $('#auDel', ov).onclick = () => hapusAuditById(a.ID);
-  $('#auGo', ov).onclick = () => {
+  $('#auGo', ov).onclick = async () => {
     const nama = $('#auN').value.trim(); if (!nama) { toast('Nama audit wajib diisi.', 'err'); return; }
+    if (a.ID && a.Status === 'Berjalan' && !(await confirmBox('Audit sedang berjalan', 'Perubahan ini langsung berlaku untuk seluruh tim dan auditee pada audit <b>' + esc(a.Nama) + '</b>. Lanjutkan menyimpan?', 'Simpan perubahan', 'orange'))) return;
     const rec = { ID: a.ID || uid(), Nama: nama, Tahun: Number($('#auY').value) || new Date().getFullYear(), Jenis: $('#auJ').value, TglMulai: $('#auM').value, TglSelesai: $('#auS').value, TglPembukaan: $('#auB').value, TglPenutupan: $('#auT').value, LingkupLokasi: $('#auL').value.trim(), JumlahLokasi: Number($('#auJL').value) || 0 };
     if (!a.ID) { rec.Status = 'Draft'; rec.DibuatOleh = S.user.email; rec.TglDibuat = nowIso(); }
     save('Audit', rec); if (!a.ID) { S.audit = rec.ID; ls.set('iasmkp_audit', rec.ID); } closeModal(); renderAuditSel(); touch(); toast('Audit disimpan.', 'ok');
@@ -730,7 +750,7 @@ function auditModal(id) {
 }
 function penModal(id) {
   const a = curAudit(), p = id ? S.d.penugasan.find(x => x.ID === id) : {}, sel = String(p.Elemen || '*') === '*' ? null : String(p.Elemen).split(',').map(s => s.trim());
-  const users = S.d.users.filter(u => u.Aktif && ['LEAD', 'AUDITOR'].indexOf(u.Role) > -1);
+  const users = S.d.users.filter(u => u.Aktif && ['LEAD', 'AUDITOR', 'PJO'].indexOf(u.Role) > -1);
   const ov = openModal(mHead(id ? 'Ubah penugasan' : 'Tambah anggota tim', 'person_add') + '<div class="m-body">' +
     '<div class="field"><label class="label">Auditor *</label><select class="select" id="pnU">' + users.map(u => '<option value="' + esc(u.Email) + '"' + (lc(p.Email) === lc(u.Email) ? ' selected' : '') + '>' + esc(u.Nama) + ' — ' + ROLE_LABEL[u.Role] + '</option>').join('') + '</select>' + (users.length ? '' : '<div class="hint">Belum ada pengguna Lead Auditor/Auditor. Tambahkan di Manajemen Pengguna.</div>') + '</div>' +
     '<div class="field"><label class="label">Peran dalam tim</label><select class="select" id="pnP">' + PERAN.map(r => '<option' + (p.Peran === r ? ' selected' : '') + '>' + r + '</option>').join('') + '</select></div>' +
